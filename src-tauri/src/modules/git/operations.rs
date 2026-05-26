@@ -45,15 +45,25 @@ fn resolve_repo_in_authorized(
     let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
     let _ = registry.authorize(&canonical_root.local_path);
 
-    let basics = git_stdout_lines(
+    let head = match git_stdout_lines(
         &canonical_root.workspace,
         &canonical_root.git_path,
         ["rev-parse", "--abbrev-ref", "HEAD"],
-    )?;
-    let head = basics.into_iter().next().ok_or(GitError::CommandFailed {
-        context: "failed to resolve HEAD",
-        detail: String::new(),
-    })?;
+    )?
+    .into_iter()
+    .next()
+    {
+        Some(h) => h,
+        None => git_stdout_line_opt(
+            &canonical_root.workspace,
+            &canonical_root.git_path,
+            ["symbolic-ref", "--short", "HEAD"],
+        )?
+        .ok_or(GitError::CommandFailed {
+            context: "failed to resolve HEAD",
+            detail: String::new(),
+        })?,
+    };
 
     let upstream = git_stdout_line_opt(
         &canonical_root.workspace,
