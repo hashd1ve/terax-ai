@@ -122,6 +122,24 @@ pub fn run() {
             registry
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
+        .setup(|app| {
+            // Start the agent-state socket listener at boot so it survives
+            // webview reloads, and expose its path for PTY env injection. If
+            // the path can't be resolved, manage an empty path so injection is
+            // simply skipped (filtered out downstream) rather than panicking.
+            let handle = app.handle().clone();
+            match modules::agent_sock::socket_path(&handle) {
+                Ok(path) => {
+                    app.manage(modules::agent_sock::AgentSockPath(path.clone()));
+                    modules::agent_sock::start_listener(handle, path);
+                }
+                Err(e) => {
+                    log::warn!("agent-state socket unavailable: {e}");
+                    app.manage(modules::agent_sock::AgentSockPath(std::path::PathBuf::new()));
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
