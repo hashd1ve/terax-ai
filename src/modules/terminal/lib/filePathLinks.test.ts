@@ -81,6 +81,25 @@ describe("parsePathTokens", () => {
     const [m] = parsePathTokens("check .env now");
     expect(m?.path).toBe(".env");
   });
+
+  it("does not linkify any fragment of an http(s) URL", () => {
+    expect(parsePathTokens("See https://example.com/foo/bar for details")).toHaveLength(0);
+    expect(parsePathTokens("Docs at http://localhost:3000/api/v1 here")).toHaveLength(0);
+  });
+
+  it("does not linkify a path-shaped tail inside a URL", () => {
+    // The github URL ends in something that looks like `src/app.ts:10`, but it
+    // belongs to the URL — the WebLinksAddon owns it.
+    expect(
+      parsePathTokens("ref https://github.com/org/repo/blob/main/src/app.ts:10"),
+    ).toHaveLength(0);
+  });
+
+  it("still linkifies a real path that sits next to a URL", () => {
+    const ms = parsePathTokens("https://x.com and ./local.ts:4");
+    expect(ms).toHaveLength(1);
+    expect(ms[0]).toMatchObject({ path: "./local.ts", line: 4 });
+  });
 });
 
 describe("resolveLeafPath", () => {

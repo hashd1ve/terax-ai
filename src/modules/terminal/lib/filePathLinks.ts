@@ -41,6 +41,12 @@ const KNOWN_EXTENSIONS = new Set([
   "sql", "graphql", "gql", "proto", "ini", "cfg", "conf", "gitignore",
 ]);
 
+// Spans belonging to a URL (`scheme://...`). A URL's `//host` and `/path`
+// fragments are path-shaped and would otherwise linkify as files, colliding
+// with the WebLinksAddon (which owns URLs). We detect URL spans and skip any
+// path token that overlaps one. `\S+` greedily takes the rest of the URL.
+const URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi;
+
 // A candidate token: a run of characters allowed in unquoted paths. We stop at
 // whitespace and shell metacharacters that can't appear mid-path. Backslashes
 // are excluded so Windows-style separators aren't mistaken for escapes here;
@@ -99,11 +105,24 @@ function looksLikePath(path: string): boolean {
  */
 export function parsePathTokens(lineText: string): PathMatch[] {
   const matches: PathMatch[] = [];
+
+  // Collect URL spans up front so path tokens inside them can be skipped.
+  const urlRanges: Array<[number, number]> = [];
+  URL_RE.lastIndex = 0;
+  let u: RegExpExecArray | null;
+  while ((u = URL_RE.exec(lineText)) !== null) {
+    urlRanges.push([u.index, u.index + u[0].length]);
+  }
+
   TOKEN_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = TOKEN_RE.exec(lineText)) !== null) {
     const raw = m[0];
     const start = m.index;
+
+    // Skip tokens that fall within a URL — the WebLinksAddon handles those.
+    const rawEnd = start + raw.length;
+    if (urlRanges.some(([a, b]) => start < b && rawEnd > a)) continue;
 
     // Trim trailing prose punctuation, adjusting the end index.
     const trimmed = raw.replace(TRAILING_TRIM, "");
