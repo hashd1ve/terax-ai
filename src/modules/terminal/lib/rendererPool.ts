@@ -318,6 +318,10 @@ export type AcquireParams = {
   // at the time it was released. When set, bindSlot skips ring replay
   // and kicks SIGWINCH so the TUI repaints from scratch.
   altScreen: boolean;
+  // True if the dormant ring dropped output while the leaf was hibernating.
+  // The tail that remains starts mid-stream and can't replay coherently, so
+  // bindSlot discards it and kicks SIGWINCH to repaint — like the alt path.
+  ringOverflowed: boolean;
   drainRing: (write: (bytes: Uint8Array) => void) => void;
   shellExited: boolean;
   searchQuery: string | null;
@@ -380,10 +384,12 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
       console.warn("[terax] snapshot replay failed:", e);
     }
   }
-  if (p.altScreen) {
-    // Discard the dormant ring. TUI output is incremental cursor-positioned
-    // updates that can't be replayed coherently on top of a stale snapshot
-    // — see the SIGWINCH kick below, which makes the TUI redraw from scratch.
+  // Discard the dormant ring (replaying nothing) when it can't be replayed
+  // coherently: alt-screen TUIs emit cursor-positioned updates, and an
+  // overflowed ring's tail starts mid-stream. In both cases the SIGWINCH kick
+  // below makes the live program (e.g. tmux) repaint from scratch instead.
+  const needsRepaintKick = p.altScreen || p.ringOverflowed;
+  if (needsRepaintKick) {
     p.drainRing(() => {});
   } else {
     p.drainRing((bytes) => slot.term.write(bytes));
@@ -418,7 +424,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
 
   applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);
 
-  if (p.altScreen && !p.shellExited) {
+  if (needsRepaintKick && !p.shellExited) {
     adapter?.resolveLeaf(p.leafId)?.kickPty(slot.term.cols, slot.term.rows);
   }
 

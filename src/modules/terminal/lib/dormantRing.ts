@@ -1,16 +1,12 @@
 const DEFAULT_BYTE_CAP = 256 * 1024;
 const DEFAULT_CHUNK_CAP = 256;
 
-const OVERFLOW_NOTICE = new TextEncoder().encode(
-  "\x1bc\x1b[2m[terax: dropped output during hibernation]\x1b[0m\r\n",
-);
-
 export class DormantRing {
   private chunks: (Uint8Array | null)[] = [];
   private head = 0;
   private size = 0;
   private total = 0;
-  private overflowed = false;
+  private didOverflow = false;
 
   constructor(
     private readonly byteCap = DEFAULT_BYTE_CAP,
@@ -20,11 +16,11 @@ export class DormantRing {
   push(bytes: Uint8Array): void {
     if (bytes.length === 0) return;
     if (bytes.length >= this.byteCap) {
-      this.chunks = [OVERFLOW_NOTICE, bytes.subarray(bytes.length - this.byteCap)];
+      this.chunks = [bytes.subarray(bytes.length - this.byteCap)];
       this.head = 0;
-      this.size = 2;
-      this.total = OVERFLOW_NOTICE.length + this.byteCap;
-      this.overflowed = true;
+      this.size = 1;
+      this.total = this.byteCap;
+      this.didOverflow = true;
       return;
     }
     this.chunks.push(bytes);
@@ -39,7 +35,7 @@ export class DormantRing {
       this.head++;
       this.size--;
       this.total -= dropped.length;
-      this.overflowed = true;
+      this.didOverflow = true;
     }
     if (this.head > 1024 && this.head > this.chunks.length / 2) {
       this.chunks = this.chunks.slice(this.head);
@@ -47,11 +43,15 @@ export class DormantRing {
     }
   }
 
+  /** Whether any buffered output was dropped while dormant. The tail that
+   *  remains then starts mid-stream and can't be replayed into a coherent
+   *  screen, so the reattach path discards it and triggers a live repaint
+   *  (SIGWINCH) instead of writing garbled bytes. Cleared by drain(). */
+  overflowed(): boolean {
+    return this.didOverflow;
+  }
+
   drain(write: (bytes: Uint8Array) => void): void {
-    if (this.overflowed) {
-      const first = this.chunks[this.head];
-      if (first !== OVERFLOW_NOTICE) write(OVERFLOW_NOTICE);
-    }
     const end = this.head + this.size;
     for (let i = this.head; i < end; i++) {
       const c = this.chunks[i];
@@ -61,7 +61,7 @@ export class DormantRing {
     this.head = 0;
     this.size = 0;
     this.total = 0;
-    this.overflowed = false;
+    this.didOverflow = false;
   }
 
   byteLength(): number {

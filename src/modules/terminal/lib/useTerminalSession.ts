@@ -231,6 +231,8 @@ function bindLeafToSlot(leafId: number, s: Session): void {
     container: s.container,
     snapshot: s.snapshot,
     altScreen,
+    // Captured before acquireSlot drains the ring (drain clears the flag).
+    ringOverflowed: s.dormantRing.overflowed(),
     drainRing: (write) => s.dormantRing.drain(write),
     shellExited: s.shellExited,
     searchQuery: s.searchQuery,
