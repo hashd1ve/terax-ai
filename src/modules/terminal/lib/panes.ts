@@ -3,7 +3,7 @@ export type PaneId = number;
 export type SplitDir = "row" | "col";
 
 export type PaneNode =
-  | { kind: "leaf"; id: PaneId; cwd?: string }
+  | { kind: "leaf"; id: PaneId; uuid: string; cwd?: string }
   | {
       kind: "split";
       id: PaneId;
@@ -15,6 +15,20 @@ export function isLeaf(
   n: PaneNode,
 ): n is Extract<PaneNode, { kind: "leaf" }> {
   return n.kind === "leaf";
+}
+
+export function newLeafUuid(): string {
+  // crypto.randomUUID is available in the Tauri webview (secure context).
+  return crypto.randomUUID();
+}
+
+export function findLeafUuid(n: PaneNode, id: PaneId): string | undefined {
+  if (isLeaf(n)) return n.id === id ? n.uuid : undefined;
+  for (const c of n.children) {
+    const found = findLeafUuid(c, id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 export function leafIds(n: PaneNode): PaneId[] {
@@ -63,13 +77,19 @@ export function splitLeaf(
   newLeafId: PaneId,
   dir: SplitDir,
   newCwd?: string,
+  newLeafUuidValue?: string,
 ): PaneNode {
   if (tree.kind === "split" && tree.dir === dir) {
     const idx = tree.children.findIndex(
       (c) => c.kind === "leaf" && c.id === targetId,
     );
     if (idx >= 0) {
-      const newLeaf: PaneNode = { kind: "leaf", id: newLeafId, cwd: newCwd };
+      const newLeaf: PaneNode = {
+        kind: "leaf",
+        id: newLeafId,
+        uuid: newLeafUuidValue ?? newLeafUuid(),
+        cwd: newCwd,
+      };
       return {
         ...tree,
         children: [
@@ -82,7 +102,12 @@ export function splitLeaf(
   }
   if (isLeaf(tree)) {
     if (tree.id !== targetId) return tree;
-    const newLeaf: PaneNode = { kind: "leaf", id: newLeafId, cwd: newCwd };
+    const newLeaf: PaneNode = {
+      kind: "leaf",
+      id: newLeafId,
+      uuid: newLeafUuidValue ?? newLeafUuid(),
+      cwd: newCwd,
+    };
     return {
       kind: "split",
       id: newSplitId,
@@ -93,7 +118,7 @@ export function splitLeaf(
   return {
     ...tree,
     children: tree.children.map((c) =>
-      splitLeaf(c, targetId, newSplitId, newLeafId, dir, newCwd),
+      splitLeaf(c, targetId, newSplitId, newLeafId, dir, newCwd, newLeafUuidValue),
     ),
   };
 }
