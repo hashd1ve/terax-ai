@@ -50,16 +50,50 @@ fn fish_init_script() -> &'static str {
 pub fn build_command(
     cwd: Option<String>,
     workspace: WorkspaceEnv,
+    pane_uuid: Option<String>,
+    agent_sock: Option<String>,
 ) -> Result<CommandBuilder, String> {
     #[cfg(unix)]
-    {
+    let mut cmd = {
         let _ = workspace;
-        unix::build(cwd)
-    }
+        unix::build(cwd)?
+    };
     #[cfg(windows)]
-    {
-        windows::build(cwd, workspace)
+    let mut cmd = windows::build(cwd, workspace)?;
+    inject_pane_env(&mut cmd, pane_uuid, agent_sock);
+    Ok(cmd)
+}
+
+/// Inject the per-pane activity env vars the bundled Claude Code hook reads:
+/// `TERAX_PANE` (the leaf uuid) and `TERAX_AGENT_SOCK` (the socket path).
+/// Empty values are skipped so a missing socket never sets a bogus var.
+fn inject_pane_env(
+    cmd: &mut CommandBuilder,
+    pane_uuid: Option<String>,
+    agent_sock: Option<String>,
+) {
+    if let Some(uuid) = pane_uuid.filter(|s| !s.is_empty()) {
+        cmd.env("TERAX_PANE", uuid);
     }
+    if let Some(sock) = agent_sock.filter(|s| !s.is_empty()) {
+        cmd.env("TERAX_AGENT_SOCK", sock);
+    }
+}
+
+/// The same two env pairs as [`inject_pane_env`], as a `Vec` for the tmux
+/// launch path (tmux carries the env into the session on create).
+pub(super) fn pane_env_pairs(
+    pane_uuid: Option<String>,
+    agent_sock: Option<String>,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(uuid) = pane_uuid.filter(|s| !s.is_empty()) {
+        out.push(("TERAX_PANE".to_string(), uuid));
+    }
+    if let Some(sock) = agent_sock.filter(|s| !s.is_empty()) {
+        out.push(("TERAX_AGENT_SOCK".to_string(), sock));
+    }
+    out
 }
 
 fn ensure_utf8_locale(cmd: &mut CommandBuilder) {

@@ -110,6 +110,8 @@ pub fn spawn(
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     tmux: Option<TmuxLaunch>,
+    pane_uuid: Option<String>,
+    agent_sock: Option<String>,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
@@ -136,7 +138,7 @@ pub fn spawn(
             }
             cmd
         }
-        None => shell_init::build_command(cwd, workspace)?,
+        None => shell_init::build_command(cwd, workspace, pane_uuid, agent_sock)?,
     };
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);

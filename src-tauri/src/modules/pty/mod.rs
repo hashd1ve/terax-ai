@@ -41,6 +41,7 @@ pub async fn pty_open(
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
+    agent_sock: tauri::State<'_, crate::modules::agent_sock::AgentSockPath>,
     cols: u16,
     rows: u16,
     cwd: Option<String>,
@@ -54,11 +55,34 @@ pub async fn pty_open(
         log::warn!("pty_open: cwd rejected: {e}");
         e
     })?;
-    let tmux_launch = build_tmux_launch(persist_id.as_deref(), cwd.as_deref(), cols, rows);
+    // persist_id is the stable leaf uuid; it also keys the activity store, so
+    // the child reports per-pane state under TERAX_PANE=<uuid> over the socket.
+    let pane_uuid = persist_id.clone();
+    let agent_sock_path = agent_sock.0.to_string_lossy().to_string();
+    let tmux_launch = build_tmux_launch(
+        persist_id.as_deref(),
+        cwd.as_deref(),
+        cols,
+        rows,
+        pane_uuid.clone(),
+        agent_sock_path.clone(),
+    );
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let session = tauri::async_runtime::spawn_blocking(move || {
-        session::spawn(id, app, cols, rows, cwd, workspace, tmux_launch, on_data, on_exit)
-            .map(|(s, _)| s)
+        session::spawn(
+            id,
+            app,
+            cols,
+            rows,
+            cwd,
+            workspace,
+            tmux_launch,
+            pane_uuid,
+            Some(agent_sock_path),
+            on_data,
+            on_exit,
+        )
+        .map(|(s, _)| s)
     })
     .await
     .map_err(|e| {
@@ -80,6 +104,8 @@ fn build_tmux_launch(
     cwd: Option<&str>,
     cols: u16,
     rows: u16,
+    pane_uuid: Option<String>,
+    agent_sock: String,
 ) -> Option<session::TmuxLaunch> {
     let persist_id = persist_id?;
     if !tmux::detect_available() {
@@ -91,7 +117,10 @@ fn build_tmux_launch(
     let cfg = cfg.to_string_lossy().to_string();
     let name = tmux::session_name(persist_id);
     let argv = shell_init::inner_shell_argv();
-    let env = shell_init::inner_shell_env(cwd.map(|s| s.to_string()));
+    let mut env = shell_init::inner_shell_env(cwd.map(|s| s.to_string()));
+    // tmux carries this env into the session; the bundled Claude Code hook
+    // reads TERAX_PANE / TERAX_AGENT_SOCK to report per-pane activity state.
+    env.extend(shell_init::pane_env_pairs(pane_uuid, Some(agent_sock)));
     let args = tmux::new_session_args(&cfg, &name, cols, rows, cwd, &argv);
     Some(session::TmuxLaunch { args, env })
 }
@@ -102,6 +131,8 @@ fn build_tmux_launch(
     _cwd: Option<&str>,
     _cols: u16,
     _rows: u16,
+    _pane_uuid: Option<String>,
+    _agent_sock: String,
 ) -> Option<session::TmuxLaunch> {
     None
 }
