@@ -132,6 +132,7 @@ pub fn run() {
             pty::pty_kill_persistent,
             pty::pty_gc_persistent,
             pty::pty_capture_scrollback,
+            pty::tmux_panes::tmux_list_panes,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

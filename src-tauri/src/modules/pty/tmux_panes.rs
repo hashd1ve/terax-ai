@@ -35,6 +35,32 @@ pub fn parse_list_panes(stdout: &str) -> Vec<PaneForeground> {
     out
 }
 
+use std::process::Command;
+
+/// Batched foreground poll. Returns `[]` if tmux is unavailable so the
+/// frontend heuristic falls back to output-activity only.
+#[tauri::command]
+pub fn tmux_list_panes() -> Vec<PaneForeground> {
+    let output = Command::new("tmux")
+        .args([
+            "-L",
+            "terax",
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name} #{pane_current_command}",
+        ])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => parse_list_panes(&String::from_utf8_lossy(&o.stdout)),
+        Ok(_) => Vec::new(), // tmux ran but no server/sessions
+        Err(e) => {
+            log::debug!("tmux_list_panes: tmux unavailable: {e}");
+            Vec::new()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
