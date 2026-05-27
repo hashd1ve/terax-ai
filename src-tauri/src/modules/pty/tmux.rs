@@ -281,6 +281,35 @@ mod tests {
         assert_eq!(parse_version("garbage"), None);
     }
 
+    // Spawns a real tmux on the terax socket. Skipped automatically when tmux
+    // is unavailable (CI without tmux). Cleans up the session it creates.
+    #[test]
+    fn integration_create_list_capture_kill_roundtrip() {
+        if !detect_available() {
+            eprintln!("skipping: tmux not installed");
+            return;
+        }
+        let cfg = ensure_config(2000).expect("config");
+        let cfg = cfg.to_string_lossy().to_string();
+        let name = session_name("itest-roundtrip");
+        // Create detached (-d) so the test process isn't attached as a client.
+        let mut create = new_session_args(&cfg, &name, 80, 24, None, &[]);
+        // Insert -d right after "new-session".
+        let pos = create.iter().position(|a| a == "new-session").unwrap();
+        create.insert(pos + 1, "-d".into());
+        let _ = run_control(&create);
+
+        let listed = run_control(&list_sessions_args()).unwrap_or_default();
+        assert!(listed.contains(&name), "session should be listed: {listed}");
+
+        // capture-pane returns Ok (content may be empty for a fresh shell).
+        let _ = run_control(&capture_pane_args(&name, 100));
+
+        let _ = run_control(&kill_session_args(&name));
+        let after = run_control(&list_sessions_args()).unwrap_or_default();
+        assert!(!after.contains(&name), "session should be gone: {after}");
+    }
+
     #[test]
     fn config_contains_required_settings() {
         let cfg = config_contents(5000);
