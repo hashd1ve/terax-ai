@@ -154,6 +154,16 @@ export function TabBar({
                   value={String(t.id)}
                   data-tab-id={t.id}
                   onDoubleClick={() => isPreview && onPin(t.id)}
+                  onAuxClick={(e) => {
+                    if (e.button === 1 && tabs.length > 1) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onClose(t.id);
+                    }
+                  }}
+                  onMouseDown={(e) => {
+                    if (e.button === 1) e.preventDefault();
+                  }}
                   style={
                     hue !== null
                       ? ({ "--tab-h": hue } as React.CSSProperties)
