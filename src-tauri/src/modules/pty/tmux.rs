@@ -5,6 +5,9 @@
 //! leaf, named `terax_<uuid>`. We do NOT use tmux's own splitting — Terax
 //! owns the layout; each session is a single window/pane.
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 pub const SOCKET: &str = "terax";
 pub const SESSION_PREFIX: &str = "terax_";
 
@@ -114,6 +117,75 @@ pub fn gc_targets(live: &[String], referenced: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Extract the version token from `tmux -V` output, e.g. "tmux 3.4" -> "3.4".
+pub fn parse_version(out: &str) -> Option<String> {
+    out.trim()
+        .strip_prefix("tmux ")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Whether tmux is usable on this platform. Windows always returns false
+/// (process survival is out of scope there — falls back to direct spawn).
+pub fn detect_available() -> bool {
+    if cfg!(windows) {
+        return false;
+    }
+    Command::new("tmux")
+        .arg("-V")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok().and_then(|s| parse_version(&s)))
+        .is_some()
+}
+
+/// Path to the injected config, materialized under the shell-integration
+/// cache root next to the existing zsh/bash configs.
+pub fn config_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+    let dir = home.join(".cache").join("terax");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("tmux.conf"))
+}
+
+/// Write the config if its contents changed (atomic replace, mirrors
+/// shell_init::write_if_changed).
+pub fn ensure_config(history_limit: u32) -> Result<PathBuf, String> {
+    let path = config_path()?;
+    let contents = config_contents(history_limit);
+    write_if_changed(&path, &contents)?;
+    Ok(path)
+}
+
+fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
+    if let Ok(existing) = std::fs::read_to_string(path) {
+        if existing == content {
+            return Ok(());
+        }
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".__terax_tmp__");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {} -> {}: {e}", tmp.display(), path.display())
+    })
+}
+
+/// Run a tmux control command (kill/list/capture) and return stdout. Used for
+/// commands that do not become the PTY's foreground process.
+pub fn run_control(args: &[String]) -> Result<String, String> {
+    let out = Command::new("tmux")
+        .args(args)
+        .output()
+        .map_err(|e| format!("tmux spawn failed: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +272,13 @@ mod tests {
         let live = vec!["terax_a".into(), "terax_b".into(), "user_shell".into()];
         let referenced = vec!["terax_a".into()];
         assert_eq!(gc_targets(&live, &referenced), vec!["terax_b".to_string()]);
+    }
+
+    #[test]
+    fn parses_version_line() {
+        assert_eq!(parse_version("tmux 3.4\n"), Some("3.4".to_string()));
+        assert_eq!(parse_version("tmux next-3.5"), Some("next-3.5".to_string()));
+        assert_eq!(parse_version("garbage"), None);
     }
 
     #[test]
