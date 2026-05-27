@@ -60,3 +60,22 @@ describe("activityStore", () => {
     expect(useActivityStore.getState().leaves["a"]).toBeUndefined();
   });
 });
+
+describe("no-tmux fallback", () => {
+  beforeEach(() => useActivityStore.setState({ leaves: {} }));
+
+  it("empty poll does not change existing leaf states", () => {
+    const s = useActivityStore.getState();
+    s.applyHook("u1", "working", 1000);
+    s.applyPoll({}, 2000); // tmux unavailable
+    expect(useActivityStore.getState().leaves["u1"].state).toBe("working");
+  });
+
+  it("hook-only flow works with no foreground polls at all", () => {
+    const s = useActivityStore.getState();
+    s.applyHook("u1", "blocked", 1000);
+    expect(useActivityStore.getState().leaves["u1"].state).toBe("blocked");
+    s.applyHook("u1", "done", 2000);
+    expect(useActivityStore.getState().leaves["u1"].state).toBe("done");
+  });
+});
