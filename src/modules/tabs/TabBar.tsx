@@ -144,6 +144,10 @@ export function TabBar({
 
               // null hue = no folder/override -> keep the default accent styling.
               const hue = resolveHue(t);
+              // Drive the active styling off activeId directly rather than
+              // Radix's data-state attribute, so the indicator never depends on
+              // a CSS data-attribute selector resolving at runtime.
+              const isActive = t.id === activeId;
               const trigger = (
                 <TabsTrigger
                   key={t.id}
@@ -156,10 +160,15 @@ export function TabBar({
                       : undefined
                   }
                   className={cn(
-                    "group h-7 shrink-0 gap-1.5 rounded-md text-xs text-muted-foreground transition-colors data-[state=active]:text-foreground hover:text-foreground/80 justify-between",
+                    "group relative h-7 shrink-0 gap-1.5 rounded-md text-xs transition-[color,opacity] justify-between",
+                    // Active tab is marked by the underline bar below; inactive
+                    // tabs only recede a touch via text/opacity.
+                    isActive
+                      ? "text-foreground opacity-100"
+                      : "text-muted-foreground opacity-80 hover:opacity-100 hover:text-foreground/80",
                     hue !== null
-                      ? "bg-[hsl(var(--tab-h)_60%_55%_/_0.10)] data-[state=active]:bg-[hsl(var(--tab-h)_65%_55%_/_0.26)]"
-                      : "data-[state=active]:bg-accent",
+                      ? "bg-[hsl(var(--tab-h)_60%_55%_/_0.10)]"
+                      : "",
                     compact
                       ? "px-1.5!"
                       : tabs.length === 1
@@ -204,6 +213,21 @@ export function TabBar({
                       />
                     </span>
                   )}
+                  {/* Active indicator bar: the tab's own hue when set, else a
+                      neutral accent. Fades in only for the active tab. */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute inset-x-1.5 bottom-0 h-[3px] rounded-t-full transition-opacity",
+                      isActive ? "opacity-100" : "opacity-0",
+                      hue === null && "bg-primary",
+                    )}
+                    style={
+                      hue !== null
+                        ? { backgroundColor: "hsl(var(--tab-h) 70% 50%)" }
+                        : undefined
+                    }
+                  />
                 </TabsTrigger>
               );
 
