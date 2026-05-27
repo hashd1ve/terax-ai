@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type PaneForeground = { uuid: string; command: string };
+export type PaneForeground = { uuid: string; command: string; path: string };
 
 export function toForegroundMap(panes: PaneForeground[]): Record<string, string> {
   const map: Record<string, string> = {};
@@ -8,12 +8,19 @@ export function toForegroundMap(panes: PaneForeground[]): Record<string, string>
   return map;
 }
 
-/** One batched tmux foreground poll. Returns `{}` when tmux is unavailable. */
-export async function pollForeground(): Promise<Record<string, string>> {
+/** uuid -> current working directory, skipping panes with no reported path. */
+export function toCwdMap(panes: PaneForeground[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const p of panes) if (p.path) map[p.uuid] = p.path;
+  return map;
+}
+
+/** One batched tmux poll (foreground command + cwd per pane). Returns `[]`
+ *  when tmux is unavailable so callers fall back gracefully. */
+export async function pollPanes(): Promise<PaneForeground[]> {
   try {
-    const panes = await invoke<PaneForeground[]>("tmux_list_panes");
-    return toForegroundMap(panes);
+    return await invoke<PaneForeground[]>("tmux_list_panes");
   } catch {
-    return {};
+    return [];
   }
 }

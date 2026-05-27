@@ -1,6 +1,14 @@
 import type { Tab } from "@/modules/tabs";
-import { pollForeground } from "@/modules/terminal/lib/foregroundPoll";
-import type { PaneNode } from "@/modules/terminal/lib/panes";
+import {
+  pollPanes,
+  toCwdMap,
+  toForegroundMap,
+} from "@/modules/terminal/lib/foregroundPoll";
+import {
+  findLeafUuid,
+  leafIds,
+  type PaneNode,
+} from "@/modules/terminal/lib/panes";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import type { ActivityState } from "../lib/activityState";
@@ -16,13 +24,37 @@ function leafUuids(node: PaneNode): string[] {
   return node.children.flatMap(leafUuids);
 }
 
+/** Build a uuid -> leafId index across all terminal tabs. tmux reports panes by
+ *  session name (the leaf uuid), but setLeafCwd keys on the numeric leaf id. */
+function uuidToLeafId(tabs: Tab[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const t of tabs) {
+    if (t.kind !== "terminal") continue;
+    for (const id of leafIds(t.paneTree)) {
+      const uuid = findLeafUuid(t.paneTree, id);
+      if (uuid) map[uuid] = id;
+    }
+  }
+  return map;
+}
+
 export function AgentActivityBridge({
   tabs,
   activeId,
+  onLeafCwd,
 }: {
   tabs: Tab[];
   activeId: number;
+  /** Push a tmux-reported cwd into the tab model so the label follows `cd`
+   *  (tmux swallows the shell's OSC 7, so polling is the only reliable source). */
+  onLeafCwd: (leafId: number, cwd: string) => void;
 }) {
+  // Latest tabs/onLeafCwd for the long-lived poll interval below.
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const onLeafCwdRef = useRef(onLeafCwd);
+  onLeafCwdRef.current = onLeafCwd;
+
   // Socket events — precise hook-reported state.
   useEffect(() => {
     let alive = true;
@@ -42,12 +74,18 @@ export function AgentActivityBridge({
     };
   }, []);
 
-  // Foreground poll interval (heuristic layer).
+  // Foreground + cwd poll interval (heuristic layer).
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
-      const fg = await pollForeground();
-      if (!cancelled) useActivityStore.getState().applyPoll(fg, Date.now());
+      const panes = await pollPanes();
+      if (cancelled) return;
+      useActivityStore.getState().applyPoll(toForegroundMap(panes), Date.now());
+      const byUuid = uuidToLeafId(tabsRef.current);
+      for (const [uuid, cwd] of Object.entries(toCwdMap(panes))) {
+        const leafId = byUuid[uuid];
+        if (leafId !== undefined) onLeafCwdRef.current(leafId, cwd);
+      }
     };
     void tick();
     const handle = setInterval(() => void tick(), POLL_MS);

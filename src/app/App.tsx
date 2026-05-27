@@ -1591,7 +1591,11 @@ export default function App() {
             activeId={activeId}
             onActivate={onActivateAgent}
           />
-          <AgentActivityBridge tabs={tabs} activeId={activeId} />
+          <AgentActivityBridge
+            tabs={tabs}
+            activeId={activeId}
+            onLeafCwd={setLeafCwd}
+          />
           <Toaster position="bottom-right" />
 
           {hasComposer ? (
