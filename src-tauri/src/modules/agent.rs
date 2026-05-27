@@ -1,19 +1,30 @@
 use serde_json::{json, Value};
 
-const HOOK_EVENTS: [(&str, &str); 3] = [
-    ("UserPromptSubmit", "working"),
-    ("Notification", "attention"),
-    ("Stop", "finished"),
+// (claude event, notify-bell OSC marker, activity-indicator state)
+const HOOK_EVENTS: [(&str, &str, &str); 5] = [
+    ("UserPromptSubmit", "working", "working"),
+    ("PreToolUse", "working", "working"),
+    ("Notification", "attention", "blocked"),
+    ("Stop", "finished", "done"),
+    ("SubagentStop", "finished", "done"),
 ];
 
 // Includes the pre-v2.1.139 /dev/tty variant so re-running migrates it.
 const OWNED_MARKERS: [&str; 2] = ["notify;Terax;", "terax;notify"];
 
-// Gated on TERAX_TERMINAL; no-op outside Terax. Returns the sequence via
-// `terminalSequence` because hooks lost /dev/tty access in v2.1.139.
-fn hook_cmd(event: &str) -> String {
+// Two effects, joined so a single command merges into one settings.json entry:
+//   1) OSC 777 marker via `terminalSequence` (existing notification bell);
+//      gated on TERAX_TERMINAL, no-op outside Terax. Uses terminalSequence
+//      because hooks lost /dev/tty access in v2.1.139.
+//   2) A per-pane JSON line to the activity socket when in a Terax pane, so the
+//      tab indicator gets precise state. Best-effort: a missing/closed socket
+//      or absent python3 is a silent no-op and never blocks the agent.
+fn hook_cmd(marker: &str, state: &str) -> String {
     format!(
-        r#"[ -n "$TERAX_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Terax;{event}\\u0007"}}' || true"#
+        r#"[ -n "$TERAX_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Terax;{marker}\\u0007"}}' ; [ -n "$TERAX_PANE" ] && [ -n "$TERAX_AGENT_SOCK" ] && python3 -c 'import socket,sys,json,os
+try:
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(0.2);s.connect(os.environ["TERAX_AGENT_SOCK"]);s.sendall((json.dumps({{"pane":os.environ["TERAX_PANE"],"state":"{state}"}})+"\n").encode());s.close()
+except OSError: pass' 2>/dev/null ; true"#
     )
 }
 
@@ -50,7 +61,7 @@ fn merge_hooks(mut root: Value) -> Value {
     }
     let hooks = hooks.as_object_mut().unwrap();
 
-    for (event, marker) in HOOK_EVENTS {
+    for (event, marker, state) in HOOK_EVENTS {
         let arr = hooks.entry(event).or_insert_with(|| json!([]));
         if !arr.is_array() {
             *arr = json!([]);
@@ -58,7 +69,7 @@ fn merge_hooks(mut root: Value) -> Value {
         let arr = arr.as_array_mut().unwrap();
         arr.retain(|group| !is_ours(group) && !is_empty_group(group));
         arr.push(json!({
-            "hooks": [ { "type": "command", "command": hook_cmd(marker) } ]
+            "hooks": [ { "type": "command", "command": hook_cmd(marker, state) } ]
         }));
     }
     root
@@ -116,7 +127,7 @@ pub fn agent_claude_hooks_status() -> bool {
     };
     HOOK_EVENTS
         .iter()
-        .all(|(_, m)| content.contains(&format!("notify;Terax;{m}")))
+        .all(|(_, m, _)| content.contains(&format!("notify;Terax;{m}")))
 }
 
 #[cfg(test)]
@@ -145,6 +156,17 @@ mod tests {
         assert!(command(&out, "UserPromptSubmit", 0).contains("notify;Terax;working"));
         assert!(command(&out, "Stop", 0).contains("terminalSequence"));
         assert!(!command(&out, "Stop", 0).contains("/dev/tty"));
+    }
+
+    #[test]
+    fn adds_pretooluse_and_subagentstop_events() {
+        let out = merge_hooks(json!({}));
+        assert_eq!(hook_count(&out, "PreToolUse"), 1);
+        assert_eq!(hook_count(&out, "SubagentStop"), 1);
+        assert!(command(&out, "PreToolUse", 0).contains("notify;Terax;working"));
+        assert!(command(&out, "Stop", 0).contains(r#""state":"done""#));
+        assert!(command(&out, "Notification", 0).contains(r#""state":"blocked""#));
+        assert!(command(&out, "UserPromptSubmit", 0).contains("TERAX_AGENT_SOCK"));
     }
 
     #[test]
@@ -201,7 +223,7 @@ mod tests {
             "hooks": {
                 "Notification": [
                     { "hooks": [] },
-                    { "hooks": [ { "type": "command", "command": hook_cmd("attention") } ] }
+                    { "hooks": [ { "type": "command", "command": hook_cmd("attention", "blocked") } ] }
                 ]
             }
         });
