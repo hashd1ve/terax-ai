@@ -3,6 +3,7 @@ import {
   findLeafCwd,
   hasLeaf,
   leafIds,
+  newLeafUuid,
   nextLeafId,
   removeLeaf,
   setLeafCwd as setLeafCwdInTree,
@@ -146,7 +147,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         kind: "terminal",
         title: initial?.title ?? "shell",
         cwd: initial?.cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd: initial?.cwd },
+        paneTree: {
+          kind: "leaf",
+          id: leafId,
+          uuid: newLeafUuid(),
+          cwd: initial?.cwd,
+        },
         activeLeafId: leafId,
       },
     ];
@@ -169,7 +175,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         kind: "terminal",
         title: "shell",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: { kind: "leaf", id: leafId, uuid: newLeafUuid(), cwd },
         activeLeafId: leafId,
       },
     ]);
@@ -188,7 +194,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           kind: "terminal",
           title,
           cwd,
-          paneTree: { kind: "leaf", id: leafId, cwd },
+          paneTree: { kind: "leaf", id: leafId, uuid: newLeafUuid(), cwd },
           activeLeafId: leafId,
         },
       ]);
@@ -208,7 +214,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         kind: "terminal",
         title: "private",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: { kind: "leaf", id: leafId, uuid: newLeafUuid(), cwd },
         activeLeafId: leafId,
         private: true,
       },
@@ -701,6 +707,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
             leafId,
             dir,
             t.cwd,
+            newLeafUuid(),
           );
           return { ...t, paneTree, activeLeafId: leafId };
         }),
@@ -792,7 +799,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           kind: "terminal",
           title: "shell",
           cwd,
-          paneTree: { kind: "leaf", id: leafId, cwd },
+          paneTree: { kind: "leaf", id: leafId, uuid: newLeafUuid(), cwd },
           activeLeafId: leafId,
         },
       ];
