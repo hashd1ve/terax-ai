@@ -15,7 +15,9 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { useActivityStore } from "@/modules/agents/store/activityStore";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import type { PaneNode } from "@/modules/terminal/lib/panes";
 import {
   Cancel01Icon,
   Clock01Icon,
@@ -24,6 +26,7 @@ import {
   GitCompareIcon,
   Globe02Icon,
   IncognitoIcon,
+  Loading03Icon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -117,6 +120,7 @@ export function TabBar({
                     )}
                   >
                     <TabIcon tab={t} />
+                    <ActivityIndicator tab={t} />
                     <TabRenameInput
                       initial={labelFor(t)}
                       onCommit={(value) => {
@@ -156,6 +160,7 @@ export function TabBar({
                     <span className={cn("truncate", isPreview && "italic")}>
                       {labelFor(t)}
                     </span>
+                    <ActivityIndicator tab={t} />
                     {t.kind === "editor" && t.dirty ? (
                       <span
                         aria-label="Unsaved changes"
@@ -340,6 +345,40 @@ function TabIcon({ tab }: { tab: Tab }) {
       size={14}
       strokeWidth={2}
       className="shrink-0"
+    />
+  );
+}
+
+function leafUuids(node: PaneNode): string[] {
+  if (node.kind === "leaf") return node.uuid ? [node.uuid] : [];
+  return node.children.flatMap(leafUuids);
+}
+
+function ActivityIndicator({ tab }: { tab: Tab }) {
+  // Subscribe so the dot/spinner updates live as states change. Selector
+  // returns a primitive (ActivityState), so Zustand's Object.is comparison
+  // prevents extra re-renders.
+  const state = useActivityStore((s) =>
+    tab.kind === "terminal" ? s.rollUpFor(leafUuids(tab.paneTree)) : "idle",
+  );
+  if (tab.kind !== "terminal" || state === "idle") return null;
+  if (state === "working") {
+    return (
+      <HugeiconsIcon
+        icon={Loading03Icon}
+        size={11}
+        strokeWidth={2}
+        className="shrink-0 animate-spin text-muted-foreground"
+        aria-label="Working"
+      />
+    );
+  }
+  // blocked -> red, done -> blue. Mirrors the unsaved-changes dot.
+  const color = state === "blocked" ? "bg-red-500" : "bg-blue-500";
+  return (
+    <span
+      aria-label={state === "blocked" ? "Needs input" : "Done"}
+      className={cn("size-1.5 shrink-0 rounded-full", color)}
     />
   );
 }
