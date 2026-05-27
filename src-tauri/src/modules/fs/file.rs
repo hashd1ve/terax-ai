@@ -128,6 +128,31 @@ pub fn fs_write_file(
     Ok(())
 }
 
+/// Persist raw image bytes (e.g. a pasted or dropped screenshot) to a temp file
+/// and return its absolute path, so it can be handed to a terminal program
+/// (Claude Code CLI) that reads images by path. The file is intentionally kept
+/// (not auto-deleted) — the consuming program reads it after we return.
+#[tauri::command]
+pub fn fs_write_temp_image(data: Vec<u8>, ext: String) -> Result<String, String> {
+    let ext = if !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ext.to_ascii_lowercase()
+    } else {
+        "png".to_string()
+    };
+    let file = tempfile::Builder::new()
+        .prefix("terax-paste-")
+        .suffix(&format!(".{ext}"))
+        .tempfile()
+        .map_err(|e| e.to_string())?;
+    file.as_file()
+        .write_all(&data)
+        .map_err(|e| e.to_string())?;
+    let (_, path) = file.keep().map_err(|e| e.to_string())?;
+    path.into_os_string()
+        .into_string()
+        .map_err(|_| "temp path is not valid UTF-8".to_string())
+}
+
 #[tauri::command]
 pub fn fs_canonicalize(path: String, workspace: Option<WorkspaceEnv>) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);

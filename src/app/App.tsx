@@ -80,6 +80,7 @@ import {
   leafIds,
   respawnSession,
   TerminalStack,
+  writeToSession,
   type TerminalPaneHandle,
 } from "@/modules/terminal";
 import { setTerminalLinkBridge } from "@/modules/terminal/lib/rendererPool";
@@ -719,6 +720,29 @@ export default function App() {
     });
     return () => setTerminalLinkBridge(null);
   }, [handleOpenFile]);
+
+  // Drag-and-drop files onto the active terminal: insert their (shell-quoted)
+  // paths into the PTY, so e.g. a screenshot dropped onto a `claude` session is
+  // handed over by path. Only fires when a terminal tab is active.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void getCurrentWebviewWindow()
+      .onDragDropEvent((event) => {
+        if (event.payload.type !== "drop") return;
+        const paths = event.payload.paths;
+        if (!paths || paths.length === 0) return;
+        const active = tabsRef.current.find(
+          (t) => t.id === activeIdRef.current,
+        );
+        if (active?.kind !== "terminal") return;
+        const text = `${paths.map((p) => quoteShellArg(p)).join(" ")} `;
+        writeToSession(active.activeLeafId, text);
+      })
+      .then((un) => {
+        unlisten = un;
+      });
+    return () => unlisten?.();
+  }, []);
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {

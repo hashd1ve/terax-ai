@@ -9,6 +9,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { ILink, ILinkProvider, Terminal as ITerminal } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
+import { quoteShellArg } from "@/lib/shellQuote";
+import { clipboardImageToTempPath } from "./clipboardImage";
 import { parsePathTokens, resolveLeafPath } from "./filePathLinks";
 import {
   terminalDeleteSequence,
@@ -230,14 +232,7 @@ function createSlot(): Slot {
       return false;
     }
     if (isTerminalPaste(event)) {
-      if (event.type === "keydown") {
-        void navigator.clipboard
-          .readText()
-          .then((text) => {
-            if (text) slot.term.paste(text);
-          })
-          .catch(() => {});
-      }
+      if (event.type === "keydown") void pasteIntoTerminal(slot, bridge);
       event.preventDefault();
       return false;
     }
@@ -793,14 +788,32 @@ function isTerminalCopy(e: KeyboardEvent): boolean {
 }
 
 function isTerminalPaste(e: KeyboardEvent): boolean {
-  return (
-    !IS_MAC &&
-    e.ctrlKey &&
-    e.shiftKey &&
-    !e.altKey &&
-    !e.metaKey &&
-    (e.code === "KeyV" || e.key === "v" || e.key === "V")
-  );
+  const isV = e.code === "KeyV" || e.key === "v" || e.key === "V";
+  if (!isV) return false;
+  // macOS: Cmd+V. Elsewhere: Ctrl+Shift+V (Ctrl+V is reserved for the shell).
+  return IS_MAC
+    ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+    : e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+}
+
+// Paste into the focused terminal. An image on the clipboard is written to a
+// temp file and its path is inserted (terminals are text-only; Claude Code
+// reads images by path); otherwise the clipboard text is pasted normally.
+async function pasteIntoTerminal(
+  slot: Slot,
+  bridge: LeafBridge | null,
+): Promise<void> {
+  const imagePath = await clipboardImageToTempPath();
+  if (imagePath) {
+    bridge?.writeToPty(`${quoteShellArg(imagePath)} `);
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) slot.term.paste(text);
+  } catch {
+    // Clipboard unavailable / denied — nothing to paste.
+  }
 }
 
 function isShiftEnter(e: KeyboardEvent): boolean {
