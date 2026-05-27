@@ -10,7 +10,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import type { ILink, ILinkProvider, Terminal as ITerminal } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
 import { quoteShellArg } from "@/lib/shellQuote";
-import { clipboardImageToTempPath } from "./clipboardImage";
+import { clipboardImageToTempPath, imageBlobToTempPath } from "./clipboardImage";
 import { parsePathTokens, resolveLeafPath } from "./filePathLinks";
 import {
   terminalDeleteSequence,
@@ -238,6 +238,33 @@ function createSlot(): Slot {
     }
     return true;
   });
+
+  // Image paste: a terminal can't render pixels, so write the image to a temp
+  // file and insert its shell-quoted path. Read from the paste event's
+  // clipboardData (synchronous, no permission prompt) instead of the async
+  // Clipboard API, which on macOS WKWebView pops an intrusive "Paste" button.
+  // Plain text falls through untouched to xterm's own paste handling.
+  term.textarea?.addEventListener(
+    "paste",
+    (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const image = Array.from(items).find(
+        (it) => it.kind === "file" && it.type.startsWith("image/"),
+      );
+      if (!image) return;
+      const file = image.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const leafId = slot.currentLeafId;
+      const bridge = leafId !== null ? adapter?.resolveLeaf(leafId) : null;
+      void imageBlobToTempPath(file).then((path) => {
+        if (path) bridge?.writeToPty(`${quoteShellArg(path)} `);
+      });
+    },
+    { capture: true },
+  );
 
   term.onData((data) => {
     const leafId = slot.currentLeafId;
@@ -790,10 +817,13 @@ function isTerminalCopy(e: KeyboardEvent): boolean {
 function isTerminalPaste(e: KeyboardEvent): boolean {
   const isV = e.code === "KeyV" || e.key === "v" || e.key === "V";
   if (!isV) return false;
-  // macOS: Cmd+V. Elsewhere: Ctrl+Shift+V (Ctrl+V is reserved for the shell).
-  return IS_MAC
-    ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
-    : e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+  // Only non-mac (Ctrl+Shift+V, since Ctrl+V is reserved for the shell). On
+  // macOS we let Cmd+V fall through to xterm's native paste: intercepting it to
+  // read the async Clipboard API pops WKWebView's intrusive "Paste" affordance.
+  // Image paste is handled separately via the textarea `paste` event.
+  return (
+    !IS_MAC && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey
+  );
 }
 
 // Paste into the focused terminal. An image on the clipboard is written to a
