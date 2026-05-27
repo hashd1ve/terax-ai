@@ -1,6 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   findLeafCwd,
+  findLeafUuid,
   hasLeaf,
   leafIds,
   newLeafUuid,
@@ -13,6 +15,15 @@ import {
   type SplitDir,
 } from "@/modules/terminal/lib/panes";
 import { disposeSession } from "@/modules/terminal/lib/useTerminalSession";
+
+/** Kill the persistent tmux session backing a leaf. Only called from explicit
+ *  user-close paths — never from HMR, slot eviction, or pty_close_all, so that
+ *  sessions open at quit time survive and are reattached on next launch. */
+function killPersistentLeaf(tree: PaneNode, leafId: number): void {
+  const uuid = findLeafUuid(tree, leafId);
+  if (!uuid) return;
+  void invoke("pty_kill_persistent", { name: `terax_${uuid}` }).catch(() => {});
+}
 
 // Matches the renderer slot pool size — over this we'd evict an active leaf.
 export const MAX_PANES_PER_TAB = 4;
@@ -598,12 +609,14 @@ export function useTabs(
 
   const closeTab = useCallback((id: number) => {
     let toDispose: number[] = [];
+    let disposedTree: PaneNode | null = null;
     setTabs((curr) => {
       if (curr.length <= 1) return curr;
       const idx = curr.findIndex((t) => t.id === id);
       const target = curr[idx];
       if (target && target.kind === "terminal") {
         toDispose = leafIds(target.paneTree);
+        disposedTree = target.paneTree;
       }
       const next = curr.filter((t) => t.id !== id);
       setActiveId((active) =>
@@ -611,7 +624,10 @@ export function useTabs(
       );
       return next;
     });
-    for (const lid of toDispose) disposeSession(lid);
+    for (const lid of toDispose) {
+      if (disposedTree) killPersistentLeaf(disposedTree, lid);
+      disposeSession(lid);
+    }
   }, []);
 
   const updateTab = useCallback((id: number, patch: TabPatch) => {
@@ -747,11 +763,13 @@ export function useTabs(
 
   const closePaneByLeaf = useCallback((leafId: number): void => {
     let didRemove = false;
+    let removedUuid: string | undefined;
     setTabs((curr) => {
       const tab = curr.find(
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
       );
       if (!tab || tab.kind !== "terminal") return curr;
+      removedUuid = findLeafUuid(tab.paneTree, leafId);
       const newTree = removeLeaf(tab.paneTree, leafId);
       if (newTree === null) {
         if (curr.length <= 1) return curr;
@@ -776,16 +794,25 @@ export function useTabs(
           : x,
       );
     });
-    if (didRemove) disposeSession(leafId);
+    if (didRemove) {
+      if (removedUuid) {
+        void invoke("pty_kill_persistent", {
+          name: `terax_${removedUuid}`,
+        }).catch(() => {});
+      }
+      disposeSession(leafId);
+    }
   }, []);
 
   const closeActivePane = useCallback((tabId: number): boolean => {
     let closedTab = false;
     let removedLeaf: number | null = null;
+    let removedUuid: string | undefined;
     setTabs((curr) => {
       const t = curr.find((x) => x.id === tabId);
       if (!t || t.kind !== "terminal") return curr;
       const target = t.activeLeafId;
+      removedUuid = findLeafUuid(t.paneTree, target);
       const newTree = removeLeaf(t.paneTree, target);
       if (newTree === null) {
         if (curr.length <= 1) return curr;
@@ -809,7 +836,14 @@ export function useTabs(
           : x,
       );
     });
-    if (removedLeaf !== null) disposeSession(removedLeaf);
+    if (removedLeaf !== null) {
+      if (removedUuid) {
+        void invoke("pty_kill_persistent", {
+          name: `terax_${removedUuid}`,
+        }).catch(() => {});
+      }
+      disposeSession(removedLeaf);
+    }
     return closedTab;
   }, []);
 
@@ -817,9 +851,17 @@ export function useTabs(
     const tabId = nextIdRef.current++;
     const leafId = nextIdRef.current++;
     let toDispose: number[] = [];
+    let disposedUuids: string[] = [];
     setTabs((curr) => {
       toDispose = curr.flatMap((t) =>
         t.kind === "terminal" ? leafIds(t.paneTree) : [],
+      );
+      disposedUuids = curr.flatMap((t) =>
+        t.kind === "terminal"
+          ? leafIds(t.paneTree)
+              .map((lid) => findLeafUuid(t.paneTree, lid))
+              .filter((u): u is string => u !== undefined)
+          : [],
       );
       return [
         {
@@ -833,6 +875,11 @@ export function useTabs(
       ];
     });
     setActiveId(tabId);
+    for (const uuid of disposedUuids) {
+      void invoke("pty_kill_persistent", { name: `terax_${uuid}` }).catch(
+        () => {},
+      );
+    }
     for (const lid of toDispose) disposeSession(lid);
   }, []);
 

@@ -11,16 +11,35 @@ import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { initLaunchDir } from "./lib/launchDir";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+import {
+  loadWorkspace,
+  referencedSessionNames,
+} from "./modules/workspace/lib/workspaceStore";
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 
-// Reap PTY sessions orphaned by a prior webview load before any tab spawns.
+// Reap PTY *client* handles orphaned by a prior webview load before any tab
+// spawns. tmux sessions (when used) survive this — they live in the tmux
+// server, not the app process.
 await invoke("pty_close_all").catch(() => {});
 
 // Seed before first paint so default tab mounts at target cwd (no flicker).
 await initLaunchDir();
+
+// Load persisted workspace and GC orphan tmux sessions (any terax_* not
+// referenced by the snapshot). Pass the snapshot to App via a window global
+// the App reads on mount (avoids prop drilling through createRoot).
+const persistedWorkspace = await loadWorkspace().catch(() => null);
+await invoke("pty_gc_persistent", {
+  referenced: persistedWorkspace
+    ? referencedSessionNames(persistedWorkspace)
+    : [],
+}).catch(() => {});
+
+(window as unknown as { __TERAX_WORKSPACE__?: unknown }).__TERAX_WORKSPACE__ =
+  persistedWorkspace;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <App />,

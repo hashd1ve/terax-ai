@@ -80,6 +80,12 @@ import {
 import { StatusBar } from "@/modules/statusbar";
 import { MAX_PANES_PER_TAB, useTabs, useWorkspaceCwd } from "@/modules/tabs";
 import {
+  deserializeWorkspace,
+  persistWorkspace,
+  scheduleWorkspaceSave,
+  type PersistedWorkspace,
+} from "@/modules/workspace/lib/workspaceStore";
+import {
   disposeSession,
   findLeafCwd,
   hasLeaf,
@@ -111,6 +117,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -159,7 +166,14 @@ function readSidebarView(): SidebarViewId {
   return "explorer";
 }
 
+const persistedWorkspace =
+  (window as unknown as { __TERAX_WORKSPACE__?: PersistedWorkspace | null })
+    .__TERAX_WORKSPACE__ ?? null;
+
 export default function App() {
+  const hydration = persistedWorkspace
+    ? deserializeWorkspace(persistedWorkspace)
+    : undefined;
   const {
     tabs,
     activeId,
@@ -186,12 +200,43 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
-  } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
+  } = useTabs(
+    getLaunchDir() ? { cwd: getLaunchDir() } : undefined,
+    hydration,
+  );
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  // Debounced persist on any workspace change (tab open/close, split, rename,
+  // active-tab change). Mirrors the autoSave cadence used elsewhere.
+  useEffect(() => {
+    scheduleWorkspaceSave(tabs, activeId);
+  }, [tabs, activeId]);
+
+  // Flush the workspace synchronously-as-possible on window close, then close.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        // Prevent the default close until the workspace is flushed, then close.
+        event.preventDefault();
+        try {
+          await persistWorkspace(tabsRef.current, activeIdRef.current);
+        } finally {
+          await getCurrentWindow().destroy();
+        }
+      })
+      .then((un) => {
+        unlisten = un;
+      });
+    return () => unlisten?.();
+  }, []);
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
