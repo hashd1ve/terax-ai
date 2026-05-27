@@ -28,7 +28,11 @@ function killPersistentLeaf(tree: PaneNode, leafId: number): void {
 // Matches the renderer slot pool size — over this we'd evict an active leaf.
 export const MAX_PANES_PER_TAB = 4;
 
-export type TerminalTab = {
+/** Per-tab color override (hue 0–360). `null`/absent means the color is
+ *  derived automatically from the tab's folder. Shared by every tab kind. */
+type Colorable = { colorHue?: number | null };
+
+export type TerminalTab = Colorable & {
   id: number;
   kind: "terminal";
   title: string;
@@ -41,7 +45,7 @@ export type TerminalTab = {
   customTitle?: string;
 };
 
-export type EditorTab = {
+export type EditorTab = Colorable & {
   id: number;
   kind: "editor";
   title: string;
@@ -55,21 +59,21 @@ export type EditorTab = {
   preview: boolean;
 };
 
-export type PreviewTab = {
+export type PreviewTab = Colorable & {
   id: number;
   kind: "preview";
   title: string;
   url: string;
 };
 
-export type MarkdownTab = {
+export type MarkdownTab = Colorable & {
   id: number;
   kind: "markdown";
   title: string;
   path: string;
 };
 
-export type GitDiffTab = {
+export type GitDiffTab = Colorable & {
   id: number;
   kind: "git-diff";
   title: string;
@@ -79,14 +83,14 @@ export type GitDiffTab = {
   originalPath: string | null;
 };
 
-export type GitHistoryTab = {
+export type GitHistoryTab = Colorable & {
   id: number;
   kind: "git-history";
   title: string;
   repoRoot: string;
 };
 
-export type GitCommitFileDiffTab = {
+export type GitCommitFileDiffTab = Colorable & {
   id: number;
   kind: "git-commit-file";
   title: string;
@@ -115,6 +119,8 @@ export type TabPatch = Partial<{
   url: string;
   /** Empty string resets a terminal tab to its cwd-derived name. */
   customTitle: string;
+  /** Per-tab color override (hue 0–360). `null` resets to the folder default. */
+  colorHue: number | null;
 }>;
 
 export type WorkspaceHydration = {
@@ -520,9 +526,13 @@ export function useTabs(
     setTabs((t) =>
       t.map((x) => {
         if (x.id !== id) return x;
+        // colorHue is orthogonal to kind, so it applies to every branch.
+        const color =
+          patch.colorHue !== undefined ? { colorHue: patch.colorHue } : {};
         if (x.kind === "terminal") {
           return {
             ...x,
+            ...color,
             ...(patch.title !== undefined && { title: patch.title }),
             ...(patch.cwd !== undefined && { cwd: patch.cwd }),
             ...(patch.customTitle !== undefined && {
@@ -533,6 +543,7 @@ export function useTabs(
         if (x.kind === "preview") {
           return {
             ...x,
+            ...color,
             ...(patch.title !== undefined && { title: patch.title }),
             ...(patch.url !== undefined && {
               url: patch.url,
@@ -543,6 +554,7 @@ export function useTabs(
         if (x.kind === "markdown") {
           return {
             ...x,
+            ...color,
             ...(patch.title !== undefined && { title: patch.title }),
           };
         }
@@ -553,6 +565,7 @@ export function useTabs(
             : {};
         return {
           ...x,
+          ...color,
           ...autoPin,
           ...(patch.title !== undefined && { title: patch.title }),
           ...(patch.dirty !== undefined && { dirty: patch.dirty }),

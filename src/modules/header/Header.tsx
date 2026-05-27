@@ -45,6 +45,8 @@ type Props = {
   onPin: (id: number) => void;
   /** Set a terminal tab's custom label; empty string resets to default. */
   onRename: (id: number, title: string) => void;
+  /** Override a tab's color (hue 0–360), or null to revert to the folder default. */
+  onSetColor: (id: number, hue: number | null) => void;
   onToggleSidebar: () => void;
   onSplit: (dir: "row" | "col") => void;
   /** Active tab is a terminal and below the per-tab pane cap. */
@@ -69,6 +71,7 @@ export function Header({
   onClose,
   onPin,
   onRename,
+  onSetColor,
   onToggleSidebar,
   onSplit,
   canSplit,
@@ -201,6 +204,7 @@ export function Header({
           onClose={onClose}
           onPin={onPin}
           onRename={onRename}
+          onSetColor={onSetColor}
           compact={compact}
         />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />

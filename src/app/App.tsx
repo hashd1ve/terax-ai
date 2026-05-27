@@ -1058,6 +1058,11 @@ export default function App() {
     [updateTab],
   );
 
+  const handleSetTabColor = useCallback(
+    (id: number, hue: number | null) => updateTab(id, { colorHue: hue }),
+    [updateTab],
+  );
+
   const searchTarget = useMemo<SearchTarget>(() => {
     if (isTerminalTab && activeLeafId !== null && activeSearchAddon)
       return {
@@ -1189,6 +1194,7 @@ export default function App() {
             onClose={handleClose}
             onPin={pinTab}
             onRename={handleRenameTab}
+            onSetColor={handleSetTabColor}
             onToggleSidebar={toggleSidebar}
             onSplit={splitActivePaneInActiveTab}
             canSplit={

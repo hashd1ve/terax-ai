@@ -2,7 +2,9 @@ import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
@@ -32,8 +34,12 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
+import { folderForTab, resolveHue } from "./lib/tabColor";
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab } from "./lib/useTabs";
+
+/** Equally spaced hues offered as quick color overrides in the tab menu. */
+const COLOR_HUES = [0, 30, 60, 120, 180, 210, 270, 300] as const;
 
 type Props = {
   tabs: Tab[];
@@ -49,6 +55,8 @@ type Props = {
   onPin: (id: number) => void;
   /** Set a terminal tab's custom label; empty string resets to default. */
   onRename: (id: number, title: string) => void;
+  /** Override a tab's color (hue 0–360), or null to revert to the folder default. */
+  onSetColor: (id: number, hue: number | null) => void;
   compact?: boolean;
 };
 
@@ -64,6 +72,7 @@ export function TabBar({
   onClose,
   onPin,
   onRename,
+  onSetColor,
   compact,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -133,14 +142,24 @@ export function TabBar({
                 );
               }
 
+              // null hue = no folder/override -> keep the default accent styling.
+              const hue = resolveHue(t);
               const trigger = (
                 <TabsTrigger
                   key={t.id}
                   value={String(t.id)}
                   data-tab-id={t.id}
                   onDoubleClick={() => isPreview && onPin(t.id)}
+                  style={
+                    hue !== null
+                      ? ({ "--tab-h": hue } as React.CSSProperties)
+                      : undefined
+                  }
                   className={cn(
-                    "group h-7 shrink-0 gap-1.5 rounded-md text-xs text-muted-foreground transition-colors data-[state=active]:bg-accent data-[state=active]:text-foreground hover:text-foreground/80 justify-between",
+                    "group h-7 shrink-0 gap-1.5 rounded-md text-xs text-muted-foreground transition-colors data-[state=active]:text-foreground hover:text-foreground/80 justify-between",
+                    hue !== null
+                      ? "bg-[hsl(var(--tab-h)_60%_55%_/_0.10)] data-[state=active]:bg-[hsl(var(--tab-h)_65%_55%_/_0.26)]"
+                      : "data-[state=active]:bg-accent",
                     compact
                       ? "px-1.5!"
                       : tabs.length === 1
@@ -188,19 +207,46 @@ export function TabBar({
                 </TabsTrigger>
               );
 
-              if (t.kind !== "terminal") return trigger;
+              // The color menu is offered to every tab that has a folder; tabs
+              // without one (e.g. preview) keep the bare trigger.
+              if (folderForTab(t) === null) return trigger;
 
               return (
                 <ContextMenu key={t.id}>
                   <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
-                  <ContextMenuContent className="min-w-36">
-                    <ContextMenuItem onSelect={() => setEditingId(t.id)}>
-                      <HugeiconsIcon
-                        icon={PencilEdit02Icon}
-                        size={14}
-                        strokeWidth={1.75}
-                      />
-                      <span className="flex-1">Rename</span>
+                  <ContextMenuContent className="min-w-40">
+                    {t.kind === "terminal" && (
+                      <ContextMenuItem onSelect={() => setEditingId(t.id)}>
+                        <HugeiconsIcon
+                          icon={PencilEdit02Icon}
+                          size={14}
+                          strokeWidth={1.75}
+                        />
+                        <span className="flex-1">Rename</span>
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuLabel className="text-muted-foreground">
+                      Color
+                    </ContextMenuLabel>
+                    <ContextMenuGroup className="flex flex-wrap gap-1.5 px-2 pb-1.5">
+                      {COLOR_HUES.map((h) => (
+                        <ContextMenuItem
+                          key={h}
+                          onSelect={() => onSetColor(t.id, h)}
+                          aria-label={`Set color ${h}`}
+                          className={cn(
+                            "size-5 justify-center rounded-full p-0 ring-1 ring-inset ring-black/15",
+                            t.colorHue === h && "ring-2 ring-foreground",
+                          )}
+                          style={{ backgroundColor: `hsl(${h} 65% 55%)` }}
+                        />
+                      ))}
+                    </ContextMenuGroup>
+                    <ContextMenuItem onSelect={() => onSetColor(t.id, null)}>
+                      <span className="flex-1">Automatic</span>
+                      {t.colorHue == null && (
+                        <span className="text-xs text-muted-foreground">✓</span>
+                      )}
                     </ContextMenuItem>
                     {tabs.length > 1 && (
                       <>
