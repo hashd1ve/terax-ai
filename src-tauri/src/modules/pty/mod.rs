@@ -4,6 +4,7 @@ mod da_filter;
 mod job;
 mod session;
 pub(crate) mod shell_init;
+pub(crate) mod tmux;
 
 use std::collections::HashMap;
 use std::io::Write;
