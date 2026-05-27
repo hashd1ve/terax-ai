@@ -52,19 +52,17 @@ describe("workspace serialization", () => {
     expect(snap.tabs[0].id).toBe(1);
   });
 
-  it("drops volatile non-restorable tabs (ai-diff, git-diff, git-commit-file)", () => {
+  it("drops volatile non-restorable tabs (git-diff, git-commit-file)", () => {
     const tabs = [
       terminalTab(),
       {
         id: 4,
-        kind: "ai-diff",
+        kind: "git-diff",
         title: "x",
         path: "/a",
-        originalContent: "",
-        proposedContent: "",
-        approvalId: "ap",
-        status: "pending",
-        isNewFile: false,
+        repoRoot: "/repo",
+        mode: "+",
+        originalPath: null,
       },
     ] as Tab[];
     const snap = serializeWorkspace(tabs, 1);

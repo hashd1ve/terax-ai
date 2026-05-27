@@ -8,8 +8,8 @@ import {
 
 const SESSION_PREFIX = "terax_";
 
-// Only these tab kinds restore by descriptor. ai-diff/git-diff/git-commit-file
-// are transient (tied to a live approval or working-tree state) and are dropped.
+// Only these tab kinds restore by descriptor. git-diff/git-commit-file
+// are transient (tied to working-tree state) and are dropped.
 const RESTORABLE_KINDS = new Set([
   "terminal",
   "editor",
