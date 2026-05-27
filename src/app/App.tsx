@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { AgentNotificationsBridge } from "@/modules/agents";
+import { AgentActivityBridge, AgentNotificationsBridge } from "@/modules/agents";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { Toaster } from "@/components/ui/sonner";
@@ -1588,6 +1588,7 @@ export default function App() {
             activeId={activeId}
             onActivate={onActivateAgent}
           />
+          <AgentActivityBridge tabs={tabs} activeId={activeId} />
           <Toaster position="bottom-right" />
 
           {hasComposer ? (
