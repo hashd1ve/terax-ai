@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
+import { useActivityStore } from "@/modules/agents/store/activityStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -187,6 +188,9 @@ function ensureSession(
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
+  // persistId is the stable leaf uuid (terax_<uuid> tmux session); it keys the
+  // activity store too, so record output recency for the working heuristic.
+  if (s.persistId) useActivityStore.getState().recordOutput(s.persistId, Date.now());
   const slot = getSlotForLeaf(leafId);
   if (slot) slot.term.write(bytes);
   else s.dormantRing.push(bytes);
