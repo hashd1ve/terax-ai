@@ -5,6 +5,7 @@ mod job;
 mod session;
 pub(crate) mod shell_init;
 pub(crate) mod tmux;
+pub(crate) mod tmux_panes;
 
 use std::collections::HashMap;
 use std::io::Write;
