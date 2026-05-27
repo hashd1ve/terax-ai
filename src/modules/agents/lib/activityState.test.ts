@@ -71,22 +71,33 @@ describe("computeHeuristicState", () => {
     ).toBe("blocked");
   });
 
-  it("non-agent command quiet a long time stays working (never blocked)", () => {
+  it("non-agent command quiet a long time => idle (no spinner, never blocked)", () => {
     expect(
       computeHeuristicState(
         base({ foreground: "cargo", lastOutputAt: now - (BLOCKED_QUIET_MS + 1) }),
         now,
       ),
-    ).toBe("working");
+    ).toBe("idle");
   });
 
-  it("non-shell quiet between working and blocked windows stays working", () => {
+  it("known agent quiet below the blocked window => idle (not working)", () => {
     expect(
       computeHeuristicState(
         base({ foreground: "claude", lastOutputAt: now - (WORKING_QUIET_MS + 1) }),
         now,
       ),
-    ).toBe("working");
+    ).toBe("idle");
+  });
+
+  it("non-shell foreground (node/claude) idle once output stops => no spinner", () => {
+    // Regression: Claude Code runs as `node`; a quiet node process must not
+    // spin forever. Only live output (<= WORKING_QUIET_MS) counts as working.
+    expect(
+      computeHeuristicState(
+        base({ foreground: "node", lastOutputAt: now - (WORKING_QUIET_MS + 1) }),
+        now,
+      ),
+    ).toBe("idle");
   });
 });
 

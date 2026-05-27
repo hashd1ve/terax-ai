@@ -103,7 +103,11 @@ export const useActivityStore = create<ActivityStoreState>((set, get) => ({
           ...prev,
           state: heuristic,
           source: "heuristic",
-          hadCommand: heuristic === "idle" ? false : hadCommand,
+          // Only forget "a command ran" once we're truly back at the shell
+          // prompt. A running command that merely went quiet (now "idle")
+          // must keep hadCommand so it still resolves to "done" on exit.
+          hadCommand:
+            heuristic === "idle" && isShellCommand(cmd) ? false : hadCommand,
         };
       }
       return { leaves: next };

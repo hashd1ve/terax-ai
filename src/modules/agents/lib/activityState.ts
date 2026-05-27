@@ -43,8 +43,11 @@ export function computeHeuristicState(a: LeafActivity, now: number): ActivitySta
   const quietFor = now - a.lastOutputAt;
   if (quietFor <= WORKING_QUIET_MS) return "working";
   if (quietFor > BLOCKED_QUIET_MS && isKnownAgent(a.foreground)) return "blocked";
-  // Silent non-agent command (quiet build) — or quiet agent below blocked window — stays working.
-  return "working";
+  // No live output: without a hook we can't tell "thinking silently" from
+  // "waiting for input", so we don't spin. (Claude Code runs as a `node`
+  // process, so the known-agent blocked rule above won't catch it by name —
+  // hooks are what drive precise blocked/done for it.)
+  return "idle";
 }
 
 const URGENCY: Record<ActivityState, number> = {
