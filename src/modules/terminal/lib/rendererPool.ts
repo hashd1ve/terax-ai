@@ -7,12 +7,24 @@ import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
+import type { ILink, ILinkProvider, Terminal as ITerminal } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
+import { parsePathTokens, resolveLeafPath } from "./filePathLinks";
 import {
   terminalDeleteSequence,
   terminalLineNavigationSequence,
   terminalWordNavigationSequence,
 } from "./keymap";
+
+// User home dir, resolved once for `~/` path expansion. Best-effort: stays null
+// until the async lookup lands, which only affects tilde paths.
+let cachedHome: string | null = null;
+void import("@tauri-apps/api/path")
+  .then((m) => m.homeDir())
+  .then((h) => {
+    cachedHome = h.replace(/\/+$/, "");
+  })
+  .catch(() => {});
 
 export const POOL_MAX_SIZE = 5;
 const FIT_DEBOUNCE_MS = 8;
@@ -23,6 +35,16 @@ export type SlotAdapter = {
   resolveLeaf(leafId: number): LeafBridge | null;
   evictLeaf(leafId: number): void;
   isLeafFocused(leafId: number): boolean;
+};
+
+/** App-provided bridge for terminal file-path links. Lives separately from
+ *  SlotAdapter because resolving the leaf cwd and opening an editor tab are
+ *  App-level concerns (the tab tree + openFileTab), not session plumbing. */
+export type TerminalLinkBridge = {
+  /** Current working directory of a leaf, for resolving relative paths. */
+  getLeafCwd(leafId: number): string | null;
+  /** Open a resolved (absolute) file path in the editor. */
+  openPath(absPath: string, line?: number): void;
 };
 
 export type LeafBridge = {
@@ -63,6 +85,13 @@ let adapter: SlotAdapter | null = null;
 
 export function configureRendererPool(a: SlotAdapter): void {
   adapter = a;
+}
+
+let linkBridge: TerminalLinkBridge | null = null;
+
+/** App registers how terminal file-path links resolve cwd and open files. */
+export function setTerminalLinkBridge(b: TerminalLinkBridge | null): void {
+  linkBridge = b;
 }
 
 export function forEachSlot(fn: (slot: Slot) => void): void {
@@ -130,6 +159,8 @@ function createSlot(): Slot {
   );
 
   const host = document.createElement("div");
+  // host/slot created below; link provider registered after slot exists so it
+  // can read slot.currentLeafId at scan time.
   host.style.cssText = "width:100%;height:100%;";
   host.setAttribute("data-terax-slot", String(slots.length));
   getRecycler().appendChild(host);
@@ -158,6 +189,7 @@ function createSlot(): Slot {
   };
 
   attachWebgl(slot);
+  term.registerLinkProvider(createFilePathLinkProvider(slot, term));
 
   term.attachCustomKeyEventHandler((event) => {
     const leafId = slot.currentLeafId;
@@ -689,6 +721,60 @@ function applyCursorBlinkOnSlot(slot: Slot, focused: boolean): void {
 
 export function getSlotForLeaf(leafId: number): Slot | null {
   return slots.find((s) => s.currentLeafId === leafId) ?? null;
+}
+
+// Linkifies file-path tokens in terminal output. Relative paths resolve
+// against the slot's current leaf cwd (tmux-tracked); clicking opens the file
+// in the editor at the parsed line. URL linkification stays with WebLinksAddon.
+function createFilePathLinkProvider(
+  slot: Slot,
+  term: ITerminal,
+): ILinkProvider {
+  return {
+    provideLinks(bufferLineNumber, callback) {
+      const leafId = slot.currentLeafId;
+      if (leafId === null) {
+        callback(undefined);
+        return;
+      }
+      // Buffer lines are 1-based; xterm's buffer API is 0-based. Wrapped lines
+      // are stitched so a path spanning a soft-wrap still resolves — but for
+      // simplicity and correctness we scan only the single logical row here.
+      const buf = term.buffer.active;
+      const row = buf.getLine(bufferLineNumber - 1);
+      if (!row) {
+        callback(undefined);
+        return;
+      }
+      const lineText = row.translateToString(false);
+      const matches = parsePathTokens(lineText);
+      if (matches.length === 0) {
+        callback(undefined);
+        return;
+      }
+      if (!linkBridge) {
+        callback(undefined);
+        return;
+      }
+      const cwd = linkBridge.getLeafCwd(leafId);
+      const links: ILink[] = [];
+      for (const match of matches) {
+        const abs = resolveLeafPath(match.path, cwd, cachedHome);
+        if (!abs) continue;
+        const line = match.line;
+        links.push({
+          // IBufferRange is 1-based and inclusive on both ends.
+          range: {
+            start: { x: match.startIndex + 1, y: bufferLineNumber },
+            end: { x: match.endIndex, y: bufferLineNumber },
+          },
+          text: match.text,
+          activate: () => linkBridge?.openPath(abs, line),
+        });
+      }
+      callback(links.length > 0 ? links : undefined);
+    },
+  };
 }
 
 const IS_MAC =

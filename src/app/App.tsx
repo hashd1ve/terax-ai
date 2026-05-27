@@ -103,6 +103,7 @@ import {
   writeToSession,
   type TerminalPaneHandle,
 } from "@/modules/terminal";
+import { setTerminalLinkBridge } from "@/modules/terminal/lib/rendererPool";
 import { ThemeProvider } from "@/modules/theme";
 import { listCustomThemes, saveCustomTheme } from "@/modules/theme/customThemes";
 import {
@@ -921,6 +922,25 @@ export default function App() {
     },
     [openFileTab],
   );
+
+  // Register how terminal file-path links resolve their cwd and open files.
+  // Relative paths anchor on the leaf's tmux-tracked cwd; clicking opens the
+  // file as a pinned editor tab. (Line numbers are parsed but openFileTab has
+  // no jump-to-line yet, so we open the file at the top.)
+  useEffect(() => {
+    setTerminalLinkBridge({
+      getLeafCwd: (leafId) => {
+        for (const t of tabsRef.current) {
+          if (t.kind !== "terminal") continue;
+          const cwd = findLeafCwd(t.paneTree, leafId);
+          if (cwd !== undefined) return cwd ?? null;
+        }
+        return null;
+      },
+      openPath: (absPath) => handleOpenFile(absPath, true),
+    });
+    return () => setTerminalLinkBridge(null);
+  }, [handleOpenFile]);
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {
