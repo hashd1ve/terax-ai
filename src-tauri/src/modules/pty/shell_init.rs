@@ -118,7 +118,7 @@ mod unix {
     const BASHRC: &str = include_str!("scripts/bashrc.bash");
     const FISH_INIT: &str = include_str!("scripts/init.fish");
 
-    pub enum Shell {
+    pub(super) enum Shell {
         Zsh,
         Bash,
         Fish,
@@ -126,7 +126,7 @@ mod unix {
     }
 
     impl Shell {
-        pub fn detect() -> (Shell, String) {
+        pub(super) fn detect() -> (Shell, String) {
             let path = login_shell()
                 .or_else(|| std::env::var("SHELL").ok())
                 .filter(|s| !s.is_empty())
@@ -220,7 +220,7 @@ mod unix {
         Ok(root)
     }
 
-    fn prepare_zdotdir() -> Result<PathBuf, String> {
+    pub(super) fn prepare_zdotdir() -> Result<PathBuf, String> {
         let dir = integration_root()?.join("zsh");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
         write_if_changed(&dir.join(".zshenv"), ZSHENV)?;
@@ -230,7 +230,7 @@ mod unix {
         Ok(dir)
     }
 
-    fn prepare_bash_rcfile() -> Result<PathBuf, String> {
+    pub(super) fn prepare_bash_rcfile() -> Result<PathBuf, String> {
         let dir = integration_root()?.join("bash");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
         let rc = dir.join("bashrc");
@@ -238,7 +238,7 @@ mod unix {
         Ok(rc)
     }
 
-    fn prepare_fish_conf_d() -> Result<(), String> {
+    pub(super) fn prepare_fish_conf_d() -> Result<(), String> {
         let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
         let dir = home.join(".config").join("fish").join("conf.d");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
@@ -721,6 +721,94 @@ mod windows {
                 ]
             );
         }
+    }
+}
+
+/// Build the inner shell program + args that tmux launches as its session
+/// command. Mirrors the flag choices in `unix::build` (login zsh, interactive
+/// bash/fish) and threads bash's `--rcfile` for shell integration.
+#[cfg(unix)]
+pub(super) fn inner_shell_argv() -> Vec<String> {
+    let (shell, shell_path) = unix::Shell::detect();
+    let mut argv = vec![shell_path.clone()];
+    match shell {
+        unix::Shell::Zsh => argv.push("-l".into()),
+        unix::Shell::Bash => {
+            if let Ok(rc) = unix::prepare_bash_rcfile() {
+                argv.push("--rcfile".into());
+                argv.push(rc.to_string_lossy().to_string());
+            }
+            argv.push("-i".into());
+        }
+        unix::Shell::Fish => argv.push("-i".into()),
+        unix::Shell::Other => {}
+    }
+    argv
+}
+
+/// Environment to set on the tmux client process; tmux carries it into the
+/// session on create. Performs the same side-effecting shell-integration setup
+/// the direct-spawn path does (ZDOTDIR for zsh; rc/conf.d files for bash/fish).
+#[cfg(unix)]
+pub(super) fn inner_shell_env(cwd: Option<String>) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = vec![
+        ("TERM".into(), "xterm-256color".into()),
+        ("COLORTERM".into(), "truecolor".into()),
+        ("TERAX_TERMINAL".into(), "1".into()),
+    ];
+    // UTF-8 locale fallback (mirror ensure_utf8_locale).
+    let is_utf8 = |v: &str| {
+        let up = v.to_ascii_uppercase();
+        up.contains("UTF-8") || up.contains("UTF8")
+    };
+    let already = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .any(|k| std::env::var(k).ok().as_deref().is_some_and(is_utf8));
+    if !already {
+        #[cfg(target_os = "macos")]
+        let fallback = "en_US.UTF-8";
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let fallback = "C.UTF-8";
+        env.push(("LANG".into(), fallback.into()));
+    }
+    // Shell-integration env (ZDOTDIR for zsh) — perform the same side-effecting
+    // prepare_* calls the direct path does, and return the resulting env.
+    let (shell, _path) = unix::Shell::detect();
+    if let unix::Shell::Zsh = shell {
+        if let Ok(zdotdir) = unix::prepare_zdotdir() {
+            if let Ok(user_zd) = std::env::var("ZDOTDIR") {
+                if std::path::Path::new(&user_zd) != zdotdir.as_path() {
+                    env.push(("TERAX_USER_ZDOTDIR".into(), user_zd));
+                }
+            }
+            env.push(("ZDOTDIR".into(), zdotdir.to_string_lossy().to_string()));
+        }
+    }
+    // bash/fish integration is via --rcfile/conf.d on the inner argv / FS, not
+    // env; trigger their prepare_* so the files exist.
+    match shell {
+        unix::Shell::Bash => {
+            let _ = unix::prepare_bash_rcfile();
+        }
+        unix::Shell::Fish => {
+            let _ = unix::prepare_fish_conf_d();
+        }
+        _ => {}
+    }
+    let _ = cwd; // tmux receives cwd via -c, not env
+    env
+}
+
+#[cfg(all(test, unix))]
+mod tmux_wrap_tests {
+    use super::*;
+
+    #[test]
+    fn inner_shell_argv_is_nonempty_and_starts_with_a_shell() {
+        let argv = inner_shell_argv();
+        assert!(!argv.is_empty());
+        // First element is an absolute path to a shell binary.
+        assert!(argv[0].starts_with('/'), "argv[0] = {}", argv[0]);
     }
 }
 
