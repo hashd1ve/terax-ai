@@ -75,6 +75,7 @@ import {
   type PersistedWorkspace,
 } from "@/modules/workspace/lib/workspaceStore";
 import {
+  clearFocusedTerminal,
   disposeSession,
   findLeafCwd,
   hasLeaf,
@@ -939,6 +940,9 @@ export default function App() {
       "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
       "pane.focusPrev": () => focusNextPaneInTab(activeId, -1),
       "pane.source": toggleSourceControl,
+      "terminal.clear": () => {
+        clearFocusedTerminal();
+      },
       "search.focus": () => searchInlineRef.current?.focus(),
       "shortcuts.open": () => setShortcutsOpen((v) => !v),
       "settings.open": () => void openSettingsWindow(),
@@ -973,6 +977,13 @@ export default function App() {
     (id: ShortcutId) => {
       if (id === "editor.undo" || id === "editor.redo") {
         return activeTab?.kind !== "editor";
+      }
+      if (id === "terminal.clear") {
+        // Only intercept ⌘K while a terminal is focused; elsewhere let the key
+        // fall through (we never preventDefault when disabled).
+        const target =
+          (e.target as HTMLElement | null) ?? document.activeElement;
+        return !(target as HTMLElement | null)?.closest?.(".xterm");
       }
       return false;
     },
