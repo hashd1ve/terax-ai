@@ -23,6 +23,7 @@ pub fn config_contents(history_limit: u32) -> String {
          set -g mouse off\n\
          set -g history-limit {history_limit}\n\
          set -g default-terminal \"tmux-256color\"\n\
+         set -ga terminal-overrides \",*:smcup@:rmcup@\"\n\
          set -g allow-passthrough on\n\
          set -g destroy-unattached off\n"
     )
@@ -318,5 +319,8 @@ mod tests {
         assert!(cfg.contains("destroy-unattached off"));
         assert!(cfg.contains("history-limit 5000"));
         assert!(cfg.contains("allow-passthrough on"));
+        // Disables the client's use of the outer terminal's alternate screen so
+        // xterm keeps the normal buffer (native scrollback, no wheel→arrow keys).
+        assert!(cfg.contains("terminal-overrides \",*:smcup@:rmcup@\""));
     }
 }
