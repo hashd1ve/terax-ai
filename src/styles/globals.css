@@ -143,22 +143,24 @@
   --terminal-cursor: var(--foreground);
   --terminal-cursor-accent: var(--background);
   --terminal-selection: var(--accent);
-  --terminal-ansi-black: #18181b;
-  --terminal-ansi-red: #ef4444;
-  --terminal-ansi-green: #22c55e;
-  --terminal-ansi-yellow: #eab308;
-  --terminal-ansi-blue: #3b82f6;
-  --terminal-ansi-magenta: #a855f7;
-  --terminal-ansi-cyan: #06b6d4;
-  --terminal-ansi-white: #e4e4e7;
-  --terminal-ansi-bright-black: #52525b;
-  --terminal-ansi-bright-red: #f87171;
-  --terminal-ansi-bright-green: #4ade80;
-  --terminal-ansi-bright-yellow: #facc15;
-  --terminal-ansi-bright-blue: #60a5fa;
-  --terminal-ansi-bright-magenta: #c084fc;
-  --terminal-ansi-bright-cyan: #22d3ee;
-  --terminal-ansi-bright-white: #fafafa;
+  /* Classic xterm/iTerm2 "Default" ANSI palette — vivid primaries, matches the
+     user's iTerm scheme (replaced the softer Tailwind-500 shades). */
+  --terminal-ansi-black: #000000;
+  --terminal-ansi-red: #bb0000;
+  --terminal-ansi-green: #00bb00;
+  --terminal-ansi-yellow: #bbbb00;
+  --terminal-ansi-blue: #0000bb;
+  --terminal-ansi-magenta: #bb00bb;
+  --terminal-ansi-cyan: #00bbbb;
+  --terminal-ansi-white: #bbbbbb;
+  --terminal-ansi-bright-black: #555555;
+  --terminal-ansi-bright-red: #ff5555;
+  --terminal-ansi-bright-green: #55ff55;
+  --terminal-ansi-bright-yellow: #ffff55;
+  --terminal-ansi-bright-blue: #5555ff;
+  --terminal-ansi-bright-magenta: #ff55ff;
+  --terminal-ansi-bright-cyan: #55ffff;
+  --terminal-ansi-bright-white: #ffffff;
 }
 
 :root {
