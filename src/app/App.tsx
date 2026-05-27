@@ -173,11 +173,14 @@ function readSidebarView(): SidebarViewId {
   return "explorer";
 }
 
-const persistedWorkspace =
-  (window as unknown as { __TERAX_WORKSPACE__?: PersistedWorkspace | null })
-    .__TERAX_WORKSPACE__ ?? null;
-
 export default function App() {
+  // Read the snapshot at render time, NOT at module-eval time: main.tsx assigns
+  // window.__TERAX_WORKSPACE__ *after* the `import App` statement evaluates this
+  // module, so a module-level const would always capture `null` and silently
+  // disable restore (the autosave would then overwrite the saved workspace).
+  const persistedWorkspace =
+    (window as unknown as { __TERAX_WORKSPACE__?: PersistedWorkspace | null })
+      .__TERAX_WORKSPACE__ ?? null;
   const hydration = persistedWorkspace
     ? deserializeWorkspace(persistedWorkspace)
     : undefined;
