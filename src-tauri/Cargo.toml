@@ -35,7 +35,6 @@ shared_child = "1"
 tauri-plugin-log = "2"
 tauri-plugin-os = "2"
 tauri-plugin-store = "2"
-tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tokio = { version = "1", default-features = false, features = ["rt"] }
 tempfile = "3"
@@ -54,7 +53,6 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
-tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 
 [profile.dev]
