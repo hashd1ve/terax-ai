@@ -1,6 +1,6 @@
 mod modules;
 
-use modules::{agent, fs, git, net, pty, secrets, shell, workspace};
+use modules::{agent, fs, git, pty, shell, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -111,7 +111,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(pty::PtyState::default())
         .manage(shell::ShellState::default())
-        .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
@@ -201,13 +200,6 @@ pub fn run() {
             open_settings_window,
             agent::agent_enable_claude_hooks,
             agent::agent_claude_hooks_status,
-            secrets::secrets_get,
-            secrets::secrets_set,
-            secrets::secrets_delete,
-            secrets::secrets_get_all,
-            net::lm_ping,
-            net::ai_http_request,
-            net::ai_http_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
