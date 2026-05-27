@@ -84,6 +84,8 @@ export type Preferences = {
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
+  /** True once the user dismissed the "install tmux for persistence" notice. */
+  tmuxNoticeDismissed: boolean;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
 };
 
@@ -125,6 +127,7 @@ const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
+const KEY_TMUX_NOTICE_DISMISSED = "tmuxNoticeDismissed";
 const KEY_SHORTCUTS = "shortcuts";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
@@ -179,6 +182,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
+  tmuxNoticeDismissed: false,
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
 };
 
@@ -299,6 +303,9 @@ export async function loadPreferences(): Promise<Preferences> {
     agentNotifications:
       get<boolean>(KEY_AGENT_NOTIFICATIONS) ??
       DEFAULT_PREFERENCES.agentNotifications,
+    tmuxNoticeDismissed:
+      get<boolean>(KEY_TMUX_NOTICE_DISMISSED) ??
+      DEFAULT_PREFERENCES.tmuxNoticeDismissed,
     shortcuts:
       get<Record<ShortcutId, KeyBinding[]>>(KEY_SHORTCUTS) ??
       DEFAULT_PREFERENCES.shortcuts,
@@ -486,6 +493,10 @@ export async function setAgentNotifications(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_NOTIFICATIONS, value);
 }
 
+export async function setTmuxNoticeDismissed(value: boolean): Promise<void> {
+  await writePref(KEY_TMUX_NOTICE_DISMISSED, value);
+}
+
 export async function setShortcuts(
   value: Record<ShortcutId, KeyBinding[]> | {},
 ): Promise<void> {
@@ -539,6 +550,7 @@ export async function onPreferencesChange(
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
+    [KEY_TMUX_NOTICE_DISMISSED]: "tmuxNoticeDismissed",
     [KEY_SHORTCUTS]: "shortcuts",
   };
   // Same-process writes still fire onChange immediately; cross-window writes

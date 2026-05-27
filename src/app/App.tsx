@@ -65,7 +65,14 @@ import { MarkdownStack } from "@/modules/markdown";
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setThemeId as persistThemeId } from "@/modules/settings/store";
+import {
+  loadPreferences,
+  onKeysChanged,
+  setThemeId as persistThemeId,
+  setTmuxNoticeDismissed,
+} from "@/modules/settings/store";
+import { IS_WINDOWS } from "@/lib/platform";
+import { toast } from "sonner";
 import {
   ShortcutsDialog,
   useGlobalShortcuts,
@@ -236,6 +243,32 @@ export default function App() {
         unlisten = un;
       });
     return () => unlisten?.();
+  }, []);
+
+  // One-time notice when tmux is unavailable on macOS/Linux (persistence needs
+  // it). Windows is out of scope — show nothing. Dismiss persists a flag.
+  useEffect(() => {
+    if (IS_WINDOWS) return;
+    let alive = true;
+    void invoke<boolean>("pty_tmux_available").then(async (ok) => {
+      if (!alive || ok) return;
+      const prefs = await loadPreferences().catch(() => null);
+      if (!alive || prefs?.tmuxNoticeDismissed) return;
+      toast("Install tmux to keep terminals running across restarts", {
+        description:
+          "Terax persists your workspace, but live terminal processes survive only with tmux. Try `brew install tmux`.",
+        duration: Number.POSITIVE_INFINITY,
+        action: {
+          label: "Dismiss",
+          onClick: () => {
+            void setTmuxNoticeDismissed(true).catch(() => {});
+          },
+        },
+      });
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const activeTerminalTab = useMemo(() => {
