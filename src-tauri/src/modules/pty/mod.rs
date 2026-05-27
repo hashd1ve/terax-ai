@@ -44,6 +44,7 @@ pub async fn pty_open(
     rows: u16,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    persist_id: Option<String>,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<u32, String> {
@@ -52,9 +53,11 @@ pub async fn pty_open(
         log::warn!("pty_open: cwd rejected: {e}");
         e
     })?;
+    let tmux_launch = build_tmux_launch(persist_id.as_deref(), cwd.as_deref(), cols, rows);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let session = tauri::async_runtime::spawn_blocking(move || {
-        session::spawn(id, app, cols, rows, cwd, workspace, on_data, on_exit).map(|(s, _)| s)
+        session::spawn(id, app, cols, rows, cwd, workspace, tmux_launch, on_data, on_exit)
+            .map(|(s, _)| s)
     })
     .await
     .map_err(|e| {
@@ -68,6 +71,38 @@ pub async fn pty_open(
     state.sessions.write().unwrap().insert(id, session);
     log::info!("pty opened id={id} cols={cols} rows={rows}");
     Ok(id)
+}
+
+#[cfg(unix)]
+fn build_tmux_launch(
+    persist_id: Option<&str>,
+    cwd: Option<&str>,
+    cols: u16,
+    rows: u16,
+) -> Option<session::TmuxLaunch> {
+    let persist_id = persist_id?;
+    if !tmux::detect_available() {
+        return None;
+    }
+    // history-limit = terminal scrollback default; the frontend caps capture to
+    // this when preloading. Keep in sync with TERMINAL_SCROLLBACK_MAX upstream.
+    let cfg = tmux::ensure_config(50_000).ok()?;
+    let cfg = cfg.to_string_lossy().to_string();
+    let name = tmux::session_name(persist_id);
+    let argv = shell_init::inner_shell_argv();
+    let env = shell_init::inner_shell_env(cwd.map(|s| s.to_string()));
+    let args = tmux::new_session_args(&cfg, &name, cols, rows, cwd, &argv);
+    Some(session::TmuxLaunch { args, env })
+}
+
+#[cfg(windows)]
+fn build_tmux_launch(
+    _persist_id: Option<&str>,
+    _cwd: Option<&str>,
+    _cols: u16,
+    _rows: u16,
+) -> Option<session::TmuxLaunch> {
+    None
 }
 
 #[tauri::command]

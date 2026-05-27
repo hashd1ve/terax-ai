@@ -93,6 +93,14 @@ impl Drop for ChildKillGuard {
     }
 }
 
+/// When present, the PTY runs `tmux <args>` instead of the bare shell, so the
+/// shell process survives the app via the tmux server. `cwd`/`env` still apply
+/// to the tmux client process (tmux carries env into the session on create).
+pub struct TmuxLaunch {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     id: u32,
@@ -101,6 +109,7 @@ pub fn spawn(
     rows: u16,
     cwd: Option<String>,
     workspace: WorkspaceEnv,
+    tmux: Option<TmuxLaunch>,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
@@ -116,7 +125,19 @@ pub fn spawn(
     };
     let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
-    let cmd = shell_init::build_command(cwd, workspace)?;
+    let cmd = match tmux {
+        Some(launch) => {
+            let mut cmd = portable_pty::CommandBuilder::new("tmux");
+            for arg in &launch.args {
+                cmd.arg(arg);
+            }
+            for (k, v) in &launch.env {
+                cmd.env(k, v);
+            }
+            cmd
+        }
+        None => shell_init::build_command(cwd, workspace)?,
+    };
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
