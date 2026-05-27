@@ -52,9 +52,9 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .min_inner_size(820.0, 620.0)
         .resizable(true)
         .visible(false)
-        // Keep settings above the main app window so it doesn't get hidden
-        // when the user clicks back into the editor or terminal (#33).
-        .always_on_top(true);
+        // Always open centered on the active monitor so it reads as a dialog of
+        // the app and can never be stranded off-screen.
+        .center();
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.
     if let Some(main) = app.get_webview_window("main") {
@@ -97,6 +97,9 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // Settings is centered on open each time; letting the plugin
+                // persist its geometry can strand it off-screen (#33 follow-up).
+                .with_denylist(&["settings"])
                 .build(),
         )
         .plugin(tauri_plugin_autostart::Builder::new().build())
