@@ -123,6 +123,24 @@ export type TabPatch = Partial<{
   customTitle: string;
 }>;
 
+export type WorkspaceHydration = {
+  tabs: Tab[];
+  activeId: number;
+};
+
+function maxNodeId(tabs: Tab[]): number {
+  let max = 0;
+  const walkPane = (n: PaneNode) => {
+    max = Math.max(max, n.id);
+    if (n.kind === "split") n.children.forEach(walkPane);
+  };
+  for (const t of tabs) {
+    max = Math.max(max, t.id);
+    if (t.kind === "terminal") walkPane(t.paneTree);
+  }
+  return max;
+}
+
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path;
@@ -137,8 +155,12 @@ function titleFromUrl(url: string): string {
   }
 }
 
-export function useTabs(initial?: Partial<TerminalTab>) {
+export function useTabs(
+  initial?: Partial<TerminalTab>,
+  hydration?: WorkspaceHydration,
+) {
   const [tabs, setTabs] = useState<Tab[]>(() => {
+    if (hydration && hydration.tabs.length > 0) return hydration.tabs;
     const tabId = 1;
     const leafId = 2;
     return [
@@ -157,8 +179,14 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       },
     ];
   });
-  const [activeId, setActiveId] = useState(1);
-  const nextIdRef = useRef(3);
+  const [activeId, setActiveId] = useState(
+    hydration && hydration.tabs.length > 0 ? hydration.activeId : 1,
+  );
+  // Start id allocation above the highest persisted numeric id (tab ids + leaf
+  // + split ids) so new tabs/leaves never collide with restored ones.
+  const nextIdRef = useRef(
+    hydration && hydration.tabs.length > 0 ? maxNodeId(hydration.tabs) + 1 : 3,
+  );
   const tabsRef = useRef(tabs);
 
   useEffect(() => {
