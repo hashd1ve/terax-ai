@@ -218,3 +218,68 @@ pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
     }
     Ok(count)
 }
+
+#[tauri::command]
+pub fn pty_tmux_available() -> bool {
+    tmux::detect_available()
+}
+
+#[tauri::command]
+pub fn pty_kill_persistent(name: String) -> Result<(), String> {
+    if !name.starts_with(tmux::SESSION_PREFIX) {
+        return Err(format!("refusing to kill non-terax session: {name}"));
+    }
+    if !tmux::detect_available() {
+        return Ok(());
+    }
+    match tmux::run_control(&tmux::kill_session_args(&name)) {
+        Ok(_) => {
+            log::info!("pty_kill_persistent: killed {name}");
+            Ok(())
+        }
+        // kill-session on an already-gone session errors; treat as success.
+        Err(e) => {
+            log::debug!("pty_kill_persistent {name}: {e}");
+            Ok(())
+        }
+    }
+}
+
+/// Kill every `terax_*` session NOT in `referenced` (full session names).
+#[tauri::command]
+pub fn pty_gc_persistent(referenced: Vec<String>) -> Result<usize, String> {
+    if !tmux::detect_available() {
+        return Ok(0);
+    }
+    let out = match tmux::run_control(&tmux::list_sessions_args()) {
+        Ok(o) => o,
+        // No server / no sessions -> nothing to GC.
+        Err(_) => return Ok(0),
+    };
+    let live: Vec<String> = out
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let targets = tmux::gc_targets(&live, &referenced);
+    let n = targets.len();
+    for name in targets {
+        let _ = tmux::run_control(&tmux::kill_session_args(&name));
+    }
+    if n > 0 {
+        log::info!("pty_gc_persistent: reaped {n} orphan tmux session(s)");
+    }
+    Ok(n)
+}
+
+/// Last `lines` of a session's scrollback as plain text (for xterm preload).
+#[tauri::command]
+pub fn pty_capture_scrollback(name: String, lines: u32) -> Result<String, String> {
+    if !name.starts_with(tmux::SESSION_PREFIX) || !tmux::detect_available() {
+        return Ok(String::new());
+    }
+    tmux::run_control(&tmux::capture_pane_args(&name, lines)).or_else(|e| {
+        log::debug!("pty_capture_scrollback {name}: {e}");
+        Ok(String::new())
+    })
+}
