@@ -1,7 +1,13 @@
 import { useTheme } from "@/modules/theme";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { isRestoredLeaf } from "@/modules/workspace/lib/workspaceStore";
 import type { SearchAddon } from "@xterm/addon-search";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { useTerminalSession } from "./lib/useTerminalSession";
+import {
+  preloadScrollback,
+  useTerminalSession,
+  whenSessionReady,
+} from "./lib/useTerminalSession";
 
 export type TerminalPaneHandle = {
   write: (data: string) => void;
@@ -59,6 +65,19 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(
       const id = requestAnimationFrame(() => session.applyTheme());
       return () => cancelAnimationFrame(id);
     }, [resolvedMode, themeId, customThemes, session]);
+
+    // Preload prior tmux scrollback once for restored panes (those that came
+    // from the persisted snapshot), after the session reattaches. No-op for
+    // freshly created tabs and when capture returns empty (no tmux).
+    const didPreload = useRef(false);
+    const scrollback = usePreferencesStore((p) => p.terminalScrollback);
+    useEffect(() => {
+      if (didPreload.current || !persistId || !isRestoredLeaf(persistId)) return;
+      didPreload.current = true;
+      void whenSessionReady(leafId).then(() =>
+        preloadScrollback(leafId, `terax_${persistId}`, scrollback),
+      );
+    }, [leafId, persistId, scrollback]);
 
     useImperativeHandle(
       ref,

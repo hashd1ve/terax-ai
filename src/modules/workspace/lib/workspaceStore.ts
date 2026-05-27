@@ -71,6 +71,25 @@ export function referencedSessionNames(snap: PersistedWorkspace): string[] {
   return names;
 }
 
+// Set of leaf uuids that existed in the snapshot loaded at launch. Used to
+// trigger one-time scrollback preload only for restored panes (not freshly
+// created tabs). Populated once on boot from the persisted snapshot.
+const restoredLeafUuids = new Set<string>();
+
+/** Record the leaf uuids from the snapshot loaded at launch. */
+export function markRestoredLeaves(snap: PersistedWorkspace | null): void {
+  restoredLeafUuids.clear();
+  if (!snap) return;
+  for (const name of referencedSessionNames(snap)) {
+    restoredLeafUuids.add(name.slice(SESSION_PREFIX.length));
+  }
+}
+
+/** True if this leaf uuid came from the snapshot restored at launch. */
+export function isRestoredLeaf(uuid: string | undefined): boolean {
+  return uuid !== undefined && restoredLeafUuids.has(uuid);
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Debounced persist (200ms). Mirrors the autoSave cadence used elsewhere. */

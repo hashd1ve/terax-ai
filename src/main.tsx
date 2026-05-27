@@ -13,6 +13,7 @@ import { initLaunchDir } from "./lib/launchDir";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 import {
   loadWorkspace,
+  markRestoredLeaves,
   referencedSessionNames,
 } from "./modules/workspace/lib/workspaceStore";
 
@@ -32,6 +33,7 @@ await initLaunchDir();
 // referenced by the snapshot). Pass the snapshot to App via a window global
 // the App reads on mount (avoids prop drilling through createRoot).
 const persistedWorkspace = await loadWorkspace().catch(() => null);
+markRestoredLeaves(persistedWorkspace);
 await invoke("pty_gc_persistent", {
   referenced: persistedWorkspace
     ? referencedSessionNames(persistedWorkspace)
