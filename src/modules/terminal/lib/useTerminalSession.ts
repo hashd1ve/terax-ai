@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { SearchAddon } from "@xterm/addon-search";
@@ -35,6 +36,7 @@ type Session = {
   pty: PtySession | null;
   ptyOpening: boolean;
   initialCwd: string | undefined;
+  persistId: string | undefined;
   lastCwd: string | null;
   pendingExit: number | null;
   shellExited: boolean;
@@ -142,7 +144,11 @@ configureRendererPool({
   },
 });
 
-function ensureSession(leafId: number, initialCwd?: string): Session {
+function ensureSession(
+  leafId: number,
+  initialCwd?: string,
+  persistId?: string,
+): Session {
   const existing = sessions.get(leafId);
   if (existing) return existing;
 
@@ -150,6 +156,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     pty: null,
     ptyOpening: false,
     initialCwd,
+    persistId,
     lastCwd: null,
     pendingExit: null,
     shellExited: false,
@@ -207,6 +214,7 @@ async function openPtyForSession(
       },
     },
     cwd,
+    s.persistId,
   );
 }
 
@@ -365,12 +373,39 @@ export function disposeSession(leafId: number): void {
   }
 }
 
+/** Preload prior tmux scrollback into the xterm buffer on reattach. The text
+ *  is plain (capture-pane -p); append a newline so the live prompt starts on a
+ *  fresh line. No-op when capture returns empty (fresh session / no tmux). */
+export async function preloadScrollback(
+  leafId: number,
+  sessionName: string,
+  lines: number,
+): Promise<void> {
+  const s = sessions.get(leafId);
+  if (!s) return;
+  let text = "";
+  try {
+    text = await invoke<string>("pty_capture_scrollback", {
+      name: sessionName,
+      lines,
+    });
+  } catch {
+    return;
+  }
+  if (!text) return;
+  const bytes = new TextEncoder().encode(text.replace(/\n/g, "\r\n") + "\r\n");
+  const slot = getSlotForLeaf(leafId);
+  if (slot) slot.term.write(bytes);
+  else s.dormantRing.push(bytes);
+}
+
 type Options = {
   leafId: number;
   container: React.RefObject<HTMLDivElement | null>;
   visible: boolean;
   focused?: boolean;
   initialCwd?: string;
+  persistId?: string;
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
@@ -382,6 +417,7 @@ export function useTerminalSession({
   visible,
   focused = true,
   initialCwd,
+  persistId,
   onSearchReady,
   onExit,
   onCwd,
@@ -391,7 +427,7 @@ export function useTerminalSession({
 
   useEffect(() => {
     let cancelled = false;
-    const s = ensureSession(leafId, initialCwd);
+    const s = ensureSession(leafId, initialCwd, persistId);
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
       const node = container.current;
@@ -407,7 +443,7 @@ export function useTerminalSession({
       cancelled = true;
       detachSession(leafId);
     };
-  }, [leafId, container, initialCwd]);
+  }, [leafId, container, initialCwd, persistId]);
 
   const fontSize = usePreferencesStore((p) => p.terminalFontSize);
   const zoomLevel = usePreferencesStore((p) => p.zoomLevel);
