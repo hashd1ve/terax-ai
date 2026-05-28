@@ -974,7 +974,7 @@ export default function App() {
   );
 
   const shortcutsDisabled = useCallback(
-    (id: ShortcutId) => {
+    (id: ShortcutId, e: KeyboardEvent) => {
       if (id === "editor.undo" || id === "editor.redo") {
         return activeTab?.kind !== "editor";
       }
