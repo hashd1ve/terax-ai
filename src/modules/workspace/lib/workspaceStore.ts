@@ -15,6 +15,7 @@ const RESTORABLE_KINDS = new Set([
   "editor",
   "preview",
   "markdown",
+  "html-preview",
   "git-history",
 ]);
 

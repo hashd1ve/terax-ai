@@ -36,10 +36,15 @@ export type EntryRowProps = {
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
   onOpenMarkdownPreview?: (path: string) => void;
+  onOpenHtmlPreview?: (path: string) => void;
 };
 
 function isMarkdownPath(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path);
+}
+
+function isHtmlPath(path: string): boolean {
+  return /\.(html?|xhtml)$/i.test(path);
 }
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -58,6 +63,7 @@ function EntryRowImpl(props: EntryRowProps) {
     onRevealInTerminal,
     onAttachToAgent,
     onOpenMarkdownPreview,
+    onOpenHtmlPreview,
   } = props;
 
   const [isConfirming, setIsConfirming] = useState(false);
@@ -144,6 +150,14 @@ function EntryRowImpl(props: EntryRowProps) {
           <ContextMenuItem
             className={COMPACT_ITEM}
             onSelect={() => onOpenMarkdownPreview(path)}
+          >
+            Open Preview
+          </ContextMenuItem>
+        )}
+        {!isDir && isHtmlPath(path) && onOpenHtmlPreview && (
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            onSelect={() => onOpenHtmlPreview(path)}
           >
             Open Preview
           </ContextMenuItem>

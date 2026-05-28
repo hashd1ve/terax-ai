@@ -15,6 +15,7 @@ export function folderForTab(tab: Tab): string | null {
       return tab.cwd ?? null;
     case "editor":
     case "markdown":
+    case "html-preview":
       return dirname(tab.path);
     case "git-diff":
     case "git-history":

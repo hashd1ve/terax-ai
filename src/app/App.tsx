@@ -44,6 +44,7 @@ import {
   type SearchTarget,
 } from "@/modules/header";
 import { MarkdownStack } from "@/modules/markdown";
+import { HtmlPreviewStack } from "@/modules/html-preview";
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -173,6 +174,7 @@ export default function App() {
     pinTab,
     newPreviewTab,
     newMarkdownTab,
+    newHtmlPreviewTab,
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
@@ -453,6 +455,7 @@ export default function App() {
   const isEditorTab = activeTab?.kind === "editor";
   const isPreviewTab = activeTab?.kind === "preview";
   const isMarkdownTab = activeTab?.kind === "markdown";
+  const isHtmlPreviewTab = activeTab?.kind === "html-preview";
   const isGitDiffTab =
     activeTab?.kind === "git-diff" || activeTab?.kind === "git-commit-file";
   const isGitHistoryTab = activeTab?.kind === "git-history";
@@ -896,6 +899,13 @@ export default function App() {
     [newMarkdownTab],
   );
 
+  const openHtmlPreview = useCallback(
+    (path: string) => {
+      newHtmlPreviewTab(path);
+    },
+    [newHtmlPreviewTab],
+  );
+
   const splitActivePaneInActiveTab = useCallback(
     (dir: "row" | "col") => {
       const t = tabsRef.current.find((x) => x.id === activeId);
@@ -1154,6 +1164,15 @@ export default function App() {
       <div
         className={cn(
           "absolute inset-0 px-3 pt-2 pb-2",
+          !isHtmlPreviewTab && "invisible pointer-events-none",
+        )}
+        aria-hidden={!isHtmlPreviewTab}
+      >
+        <HtmlPreviewStack tabs={tabs} activeId={activeId} />
+      </div>
+      <div
+        className={cn(
+          "absolute inset-0 px-3 pt-2 pb-2",
           !isGitDiffTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isGitDiffTab}
@@ -1234,6 +1253,7 @@ export default function App() {
                         onPathDeleted={handlePathDeleted}
                         onRevealInTerminal={cdInNewTab}
                         onOpenMarkdownPreview={openMarkdownPreview}
+                        onOpenHtmlPreview={openHtmlPreview}
                       />
                     ) : (
                       <SourceControlPanel

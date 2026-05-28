@@ -46,6 +46,7 @@ type Props = {
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
   onOpenMarkdownPreview?: (path: string) => void;
+  onOpenHtmlPreview?: (path: string) => void;
 };
 
 type Row =
@@ -153,6 +154,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       onRevealInTerminal,
       onAttachToAgent,
       onOpenMarkdownPreview,
+      onOpenHtmlPreview,
     },
     ref,
   ) {
@@ -343,6 +345,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
               onRevealInTerminal={onRevealInTerminal}
               onAttachToAgent={onAttachToAgent}
               onOpenMarkdownPreview={onOpenMarkdownPreview}
+              onOpenHtmlPreview={onOpenHtmlPreview}
             />
           );
         }
@@ -433,6 +436,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
           onActiveChange={setIsSearchActive}
           onRevealInTerminal={onRevealInTerminal}
           onAttachToAgent={onAttachToAgent}
+          onOpenMarkdownPreview={onOpenMarkdownPreview}
+          onOpenHtmlPreview={onOpenHtmlPreview}
         />
 
         {!isSearchActive ? (

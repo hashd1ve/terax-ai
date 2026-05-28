@@ -52,7 +52,17 @@ type Props = {
   onActiveChange?: (active: boolean) => void;
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
+  onOpenMarkdownPreview?: (path: string) => void;
+  onOpenHtmlPreview?: (path: string) => void;
 };
+
+function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown|mdx)$/i.test(path);
+}
+
+function isHtmlPath(path: string): boolean {
+  return /\.(html?|xhtml)$/i.test(path);
+}
 
 export type ExplorerSearchHandle = {
   focus: () => void;
@@ -67,6 +77,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   onActiveChange,
   onRevealInTerminal,
   onAttachToAgent,
+  onOpenMarkdownPreview,
+  onOpenHtmlPreview,
 }: Props,
   ref,
 ) {
@@ -283,6 +295,26 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                           Open
                         </ContextMenuItem>
                       )}
+                      {!hit.is_dir &&
+                        isMarkdownPath(hit.path) &&
+                        onOpenMarkdownPreview && (
+                          <ContextMenuItem
+                            className={COMPACT_ITEM}
+                            onSelect={() => onOpenMarkdownPreview(hit.path)}
+                          >
+                            Open Preview
+                          </ContextMenuItem>
+                        )}
+                      {!hit.is_dir &&
+                        isHtmlPath(hit.path) &&
+                        onOpenHtmlPreview && (
+                          <ContextMenuItem
+                            className={COMPACT_ITEM}
+                            onSelect={() => onOpenHtmlPreview(hit.path)}
+                          >
+                            Open Preview
+                          </ContextMenuItem>
+                        )}
                       {hit.is_dir && onRevealInTerminal && (
                         <ContextMenuItem
                           className={COMPACT_ITEM}

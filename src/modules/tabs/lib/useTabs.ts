@@ -73,6 +73,13 @@ export type MarkdownTab = Colorable & {
   path: string;
 };
 
+export type HtmlPreviewTab = Colorable & {
+  id: number;
+  kind: "html-preview";
+  title: string;
+  path: string;
+};
+
 export type GitDiffTab = Colorable & {
   id: number;
   kind: "git-diff";
@@ -107,6 +114,7 @@ export type Tab =
   | EditorTab
   | PreviewTab
   | MarkdownTab
+  | HtmlPreviewTab
   | GitDiffTab
   | GitHistoryTab
   | GitCommitFileDiffTab;
@@ -353,6 +361,27 @@ export function useTabs(
     return targetId;
   }, []);
 
+  const newHtmlPreviewTab = useCallback((path: string) => {
+    let targetId: number | null = null;
+    setTabs((curr) => {
+      const existing = curr.find(
+        (t) => t.kind === "html-preview" && t.path === path,
+      );
+      if (existing) {
+        targetId = existing.id;
+        return curr;
+      }
+      const id = nextIdRef.current++;
+      targetId = id;
+      return [
+        ...curr,
+        { id, kind: "html-preview", title: basename(path), path },
+      ];
+    });
+    if (targetId !== null) setActiveId(targetId);
+    return targetId;
+  }, []);
+
   const openGitDiffTab = useCallback(
     (input: {
       path: string;
@@ -551,7 +580,7 @@ export function useTabs(
             }),
           };
         }
-        if (x.kind === "markdown") {
+        if (x.kind === "markdown" || x.kind === "html-preview") {
           return {
             ...x,
             ...color,
@@ -792,6 +821,7 @@ export function useTabs(
     pinTab,
     newPreviewTab,
     newMarkdownTab,
+    newHtmlPreviewTab,
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
