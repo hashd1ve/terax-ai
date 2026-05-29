@@ -70,6 +70,10 @@ describe("pillFor", () => {
     const calm: AgentSession["status"] = "waiting";
     expect(pillFor(calm, "done")).toBe("waiting");
   });
+
+  it("maps a done status to the done pill", () => {
+    expect(pillFor("done", "idle")).toBe("done");
+  });
 });
 
 describe("sortCards", () => {

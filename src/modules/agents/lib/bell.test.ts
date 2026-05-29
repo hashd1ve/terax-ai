@@ -32,4 +32,8 @@ describe("bellBadgeCount", () => {
   it("is zero when nothing needs attention", () => {
     expect(bellBadgeCount([session(1, "working")], [note("finished", false)])).toBe(0);
   });
+
+  it("does not count done sessions as needing attention", () => {
+    expect(bellBadgeCount([session(1, "done"), session(2, "waiting")], [])).toBe(1);
+  });
 });

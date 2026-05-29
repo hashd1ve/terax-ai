@@ -135,7 +135,7 @@ function handleSignal(sig: AgentSignal, ctx: Ctx): void {
       void onAttention(leafId, ctx);
       return;
     case "finished":
-      store.setStatus(leafId, "waiting");
+      store.setStatus(leafId, "done");
       void onFinished(leafId, ctx);
       return;
     case "error":

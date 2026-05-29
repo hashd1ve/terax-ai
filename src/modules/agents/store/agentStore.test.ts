@@ -39,6 +39,15 @@ describe("agentStore", () => {
     expect(useAgentStore.getState().sessions[99]).toBeUndefined();
   });
 
+  it("setStatus done leaves attentionSince null", () => {
+    const s = useAgentStore.getState();
+    s.start(1, 10, "claude");
+    s.setStatus(1, "done");
+    const session = useAgentStore.getState().sessions[1];
+    expect(session.status).toBe("done");
+    expect(session.attentionSince).toBeNull();
+  });
+
   it("pushNotification carries the title snapshot", () => {
     useAgentStore.getState().pushNotification({
       source: "terminal",
