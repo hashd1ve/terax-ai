@@ -15,7 +15,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { AgentIcon } from "../lib/agentIcon";
-import type { AgentNotification, AgentStatus } from "../lib/types";
+import type { AgentNotification, AgentSession } from "../lib/types";
+import { bellBadgeCount } from "../lib/bell";
 import { useAgentStore } from "../store/agentStore";
 
 type Props = {
@@ -32,36 +33,42 @@ function relativeTime(ts: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function StatusRow({
-  agent,
-  status,
+function NeedsInputRow({
+  session,
   onClick,
 }: {
-  agent: string;
-  status: AgentStatus;
+  session: AgentSession;
   onClick: () => void;
 }) {
-  const waiting = status === "waiting";
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
     >
-      <AgentIcon
-        agent={agent}
-        size={16}
-        className="shrink-0 text-muted-foreground"
-      />
-      <span className="flex-1 truncate text-sm text-foreground">{agent}</span>
-      <span
-        className={cn(
-          "flex items-center gap-1.5 text-xs",
-          waiting ? "font-medium text-primary" : "text-muted-foreground",
-        )}
-      >
-        {waiting ? <span className="size-1.5 rounded-full bg-primary" /> : null}
-        {waiting ? "waiting" : "working"}
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-primary" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+            <AgentIcon
+              agent={session.agent}
+              size={14}
+              className="mr-1 inline-block align-[-2px] text-muted-foreground"
+            />
+            {session.agent}
+            {session.title ? (
+              <span className="text-muted-foreground"> · {session.title}</span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-xs font-medium text-primary">
+            needs input
+          </span>
+        </span>
+        {session.lastPrompt ? (
+          <span className="mt-0.5 truncate text-xs text-muted-foreground">
+            {session.lastPrompt}
+          </span>
+        ) : null}
       </span>
     </button>
   );
@@ -104,7 +111,8 @@ function NotificationRow({
         )}
       </span>
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {n.agent}{" "}
+        {n.agent}
+        {n.title ? <span className="text-muted-foreground"> · {n.title}</span> : null}{" "}
         <span className="text-muted-foreground">{NOTIF_LABEL[n.kind]}</span>
       </span>
       <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
@@ -124,13 +132,11 @@ export function NotificationBell({ onActivate }: Props) {
 
   const active = useMemo(() => Object.values(sessions), [sessions]);
   const activeCount = active.length;
-  const waitingCount = active.filter((s) => s.status === "waiting").length;
-  // attention maps to an active waiting session, so only completed events add
-  // to the badge to avoid double-counting.
-  const unreadDone = notifications.filter(
-    (n) => !n.read && n.kind !== "attention",
-  ).length;
-  const badge = waitingCount + unreadDone;
+  const needsInput = useMemo(
+    () => active.filter((s) => s.status === "waiting"),
+    [active],
+  );
+  const badge = bellBadgeCount(active, notifications);
 
   const refreshHooks = () => {
     invoke<boolean>("agent_claude_hooks_status")
@@ -167,7 +173,7 @@ export function NotificationBell({ onActivate }: Props) {
     activate(n.tabId, n.leafId);
   };
 
-  const empty = activeCount === 0 && notifications.length === 0;
+  const empty = needsInput.length === 0 && notifications.length === 0;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -214,15 +220,14 @@ export function NotificationBell({ onActivate }: Props) {
           </div>
         ) : (
           <div className="max-h-80 overflow-y-auto border-t border-border/60 p-1">
-            {active.map((s) => (
-              <StatusRow
+            {needsInput.map((s) => (
+              <NeedsInputRow
                 key={s.leafId}
-                agent={s.agent}
-                status={s.status}
+                session={s}
                 onClick={() => activate(s.tabId, s.leafId)}
               />
             ))}
-            {activeCount > 0 && notifications.length > 0 ? (
+            {needsInput.length > 0 && notifications.length > 0 ? (
               <div className="mx-2 my-1 h-px bg-border/50" />
             ) : null}
             {notifications.map((n) => (
