@@ -134,6 +134,8 @@ describe("buildCards", () => {
           contextWindow: 0,
           contextPct: 42,
           costUsdEst: 0.5,
+          title: null,
+          lastPrompt: null,
         },
       },
     );

@@ -20,6 +20,8 @@ const sample: UsageInfo = {
   contextWindow: 1_000_000,
   contextPct: 43.522,
   costUsdEst: 0.713,
+  title: null,
+  lastPrompt: null,
 };
 
 describe("usageStore", () => {

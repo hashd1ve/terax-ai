@@ -24,6 +24,10 @@ export type AgentSession = {
   startedAt: number;
   lastActivityAt: number;
   attentionSince: number | null;
+  /** Conversation title (ai-title), resolved lazily from the transcript. */
+  title?: string;
+  /** The user's last prompt, shown only on the live needs-input row. */
+  lastPrompt?: string;
 };
 
 export type AgentNotification = {
@@ -32,6 +36,8 @@ export type AgentNotification = {
   leafId: number;
   tabId: number;
   agent: string;
+  /** Conversation title snapshot, kept so history rows survive the session. */
+  title?: string;
   kind: NotificationKind;
   at: number;
   read: boolean;

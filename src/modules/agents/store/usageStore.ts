@@ -12,6 +12,8 @@ export type UsageInfo = {
   contextWindow: number;
   contextPct: number;
   costUsdEst: number | null;
+  title: string | null;
+  lastPrompt: string | null;
 };
 
 type UsageStoreState = {
