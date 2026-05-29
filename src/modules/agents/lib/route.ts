@@ -1,13 +1,9 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { showAgentToast } from "../components/AgentToast";
-import { useAgentStore } from "../store/agentStore";
 import { osNotify } from "./notify";
-import type { AgentSource, NotificationKind } from "./types";
 
-type RouteArgs = {
-  source: AgentSource;
+type AlertArgs = {
   agent: string;
-  kind: NotificationKind;
   title: string;
   body?: string;
   focused: boolean;
@@ -15,29 +11,22 @@ type RouteArgs = {
   visible: boolean;
   /** Allow an in-app toast when focused but not looking at the agent. */
   allowToast: boolean;
-  tabId?: number;
-  leafId?: number;
   onActivate: () => void;
 };
 
-export function routeAgentNotification({
-  source,
+/** Toast / OS-notify for an attention (needs-input) event. The bell history is
+ *  written separately by the bridge; this function only alerts. */
+export function alertAgentAttention({
   agent,
-  kind,
   title,
   body,
   focused,
   visible,
   allowToast,
-  tabId = 0,
-  leafId = 0,
   onActivate,
-}: RouteArgs): void {
+}: AlertArgs): void {
   if (!usePreferencesStore.getState().agentNotifications) return;
   if (focused && visible) return;
-
-  useAgentStore.getState().pushNotification({ source, agent, kind, tabId, leafId });
-
   if (!focused) {
     void osNotify(title, body ?? agent);
     return;
