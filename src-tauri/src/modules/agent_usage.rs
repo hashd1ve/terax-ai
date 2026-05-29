@@ -24,6 +24,11 @@ pub struct UsageInfo {
     /// Rough USD spend for this turn, or None when the model is not in the
     /// price table (so the UI shows nothing rather than a wrong number).
     pub cost_usd_est: Option<f64>,
+    /// The agent's conversation title (`ai-title` line), or None before one is
+    /// generated. Best-effort like every other field here.
+    pub title: Option<String>,
+    /// The user's most recent prompt (`last-prompt` line), or None.
+    pub last_prompt: Option<String>,
 }
 
 const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
@@ -137,6 +142,8 @@ fn usage_from_line(line: &str) -> Option<UsageInfo> {
         context_window,
         context_pct,
         cost_usd_est,
+        title: None,
+        last_prompt: None,
     })
 }
 
@@ -148,6 +155,34 @@ pub fn parse_last_usage(jsonl: &str) -> Option<UsageInfo> {
         .lines()
         .rev()
         .find_map(|line| usage_from_line(line.trim()))
+}
+
+fn title_from_line(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("type")?.as_str()? != "ai-title" {
+        return None;
+    }
+    value.get("aiTitle")?.as_str().map(str::to_string)
+}
+
+/// Title of the LAST `ai-title` line in the text. Pure so the recency rule is
+/// testable without the filesystem. The title is rewritten roughly once per
+/// turn, so the tail almost always carries a recent one.
+pub fn parse_last_title(jsonl: &str) -> Option<String> {
+    jsonl.lines().rev().find_map(|line| title_from_line(line.trim()))
+}
+
+fn prompt_from_line(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("type")?.as_str()? != "last-prompt" {
+        return None;
+    }
+    value.get("lastPrompt")?.as_str().map(str::to_string)
+}
+
+/// The LAST user prompt (`last-prompt` line) in the text, same recency rule.
+pub fn parse_last_prompt(jsonl: &str) -> Option<String> {
+    jsonl.lines().rev().find_map(|line| prompt_from_line(line.trim()))
 }
 
 /// How much of the file tail to read. The relevant signal is the final priced
@@ -203,7 +238,11 @@ pub fn agent_read_usage(transcript_path: String) -> Result<Option<UsageInfo>, St
     let path = resolve_under_root(&transcript_path, &root)?;
 
     match read_tail(&path, TAIL_BYTES) {
-        Ok(tail) => Ok(parse_last_usage(&tail)),
+        Ok(tail) => Ok(parse_last_usage(&tail).map(|mut usage| {
+            usage.title = parse_last_title(&tail);
+            usage.last_prompt = parse_last_prompt(&tail);
+            usage
+        })),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("failed to read transcript: {e}")),
     }
@@ -293,6 +332,38 @@ mod tests {
         // On a host where it does not exist this returns Ok(None); both are
         // safe (no read of an out-of-root file ever happens).
         assert!(err.is_err() || err == Ok(None));
+    }
+
+    #[test]
+    fn last_title_wins_and_absent_is_none() {
+        let jsonl = r#"{"type":"ai-title","aiTitle":"First title","sessionId":"s"}
+{"type":"user","message":{"role":"user","content":"hi"}}
+{"type":"ai-title","aiTitle":"Renamed title","sessionId":"s"}"#;
+        assert_eq!(parse_last_title(jsonl).as_deref(), Some("Renamed title"));
+
+        let no_title = r#"{"type":"user","message":{"role":"user","content":"hi"}}"#;
+        assert_eq!(parse_last_title(no_title), None);
+        assert_eq!(parse_last_title(""), None);
+        assert_eq!(parse_last_title("not json\n{ broken"), None);
+    }
+
+    #[test]
+    fn last_prompt_wins_and_absent_is_none() {
+        let jsonl = r#"{"type":"last-prompt","lastPrompt":"do A","leafUuid":"u","sessionId":"s"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"output_tokens":1}}}
+{"type":"last-prompt","lastPrompt":"now do B","leafUuid":"u","sessionId":"s"}"#;
+        assert_eq!(parse_last_prompt(jsonl).as_deref(), Some("now do B"));
+
+        let none = r#"{"type":"ai-title","aiTitle":"t","sessionId":"s"}"#;
+        assert_eq!(parse_last_prompt(none), None);
+    }
+
+    #[test]
+    fn parse_last_usage_defaults_context_fields_to_none() {
+        let line = r#"{"type":"assistant","message":{"model":"claude-sonnet-4-6","usage":{"output_tokens":1}}}"#;
+        let info = parse_last_usage(line).unwrap();
+        assert_eq!(info.title, None);
+        assert_eq!(info.last_prompt, None);
     }
 
     #[test]
