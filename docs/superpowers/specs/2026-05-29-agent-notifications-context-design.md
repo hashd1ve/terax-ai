@@ -1,7 +1,7 @@
 # Actionable notification bell with conversation context - Design
 
 **Date:** 2026-05-29
-**Status:** Pending user review
+**Status:** Implemented on branch `feat/agent-notification-context`
 **Related:** builds on `2026-05-27-agent-activity-indicator-design.md` (the per-leaf
 state machine and hook socket) and on the usage HUD added in `c5e13b3`
 (`agent_usage.rs`, `usageStore`). First of two planned pieces; the second, a
@@ -86,21 +86,24 @@ Per-kind behavior:
 
 - **working:** no bell row. Live "working" state stays in the HUD and dashboard.
 - **needs-input (attention):** a live row derived from sessions in `waiting`
-  status, carrying title and last prompt. Still toasts and OS-notifies when the
-  user is not looking. It no longer pushes a separate history row, since the live
-  row already represents it (removes today's duplication).
-- **finished (Stop, every turn):** upsert one row per session, keyed by `leafId`.
-  If a finished row for that leaf exists, refresh its timestamp and move it to the
-  top instead of appending. It is silent (no toast) and does not count toward the
-  badge.
+  status, carrying title and last prompt. `waiting` is now set exclusively by
+  attention (finished uses `done`), so this row means a genuine block, not a
+  finished turn. Still toasts and OS-notifies when the user is not looking. It no
+  longer pushes a separate history row, since the live row already represents it
+  (removes today's duplication).
+- **finished (Stop, every turn):** sets the session status to `done` (distinct
+  from `waiting`) and upserts one row per session, keyed by `leafId`. If a finished
+  row for that leaf exists, refresh its timestamp and move it to the top instead of
+  appending. Because the status is `done`, a finished turn shows only as this quiet
+  history row and never as a needs-input row. It is silent (no toast) and does not
+  count toward the badge.
 - **error:** one history row per occurrence, carrying the title. Silent, as today.
 
-Decision to confirm in review: finished currently OS-notifies on every turn when
-the window is unfocused, which is the same per-turn noise in OS form. The coherent
-"actionable only" rule is that finished stops OS-notifying; only needs-input alerts
-the user. The bell keeps a quiet, deduped finished row for reference. If the user
-wants a "done while I was away" ping, that belongs on needs-input, not on every
-turn boundary.
+Decision (confirmed): finished previously OS-notified on every turn when the window
+was unfocused, the same per-turn noise in OS form. The "actionable only" rule is
+that finished stops OS-notifying; only needs-input alerts the user. The bell keeps a
+quiet, deduped finished row for reference. A "done while I was away" ping, if ever
+wanted, belongs on needs-input, not on every turn boundary.
 
 Badge = waiting (needs-input) count + unread errors. Finished is excluded.
 
@@ -115,6 +118,13 @@ Store shape changes:
   `pushNotification` for finished.
 - `route()` keeps the toast / OS-notify side effects but stops being the place that
   writes finished and attention history rows.
+- `AgentStatus` gains `done` (a finished turn), distinct from `waiting` (genuine
+  needs-input from attention). `finished` sets `done`; `attention` sets `waiting`.
+  The bell renders only `waiting` sessions as needs-input rows, so a finished agent
+  is never shown as needs-input.
+- `pickAgentLeafId` (Send to Claude handoff) now prefers any idle session (`waiting`
+  or `done`) over one still `working`, which preserves its prior behavior after the
+  `waiting`/`done` split.
 
 Context fetch: when an actionable signal fires, the bridge reads the leaf's
 `transcriptPath` (already tracked in `activityStore` via `setMeta`), invokes
@@ -150,7 +160,7 @@ terax:agent-signal (attention | finished | error)
   -> invoke agent_read_usage(transcriptPath)  // title + lastPrompt + usage
   -> setContext(leafId, { title, lastPrompt }) on the session
   -> attention: setStatus(waiting) + route() for toast/OS-notify only
-     finished:  setStatus(waiting) + upsertFinished({ leafId, title, ... })
+     finished:  setStatus(done) + upsertFinished({ leafId, title, ... })
      error:     pushNotification({ kind: "error", title, ... })
 NotificationBell renders waiting sessions (needs-input, 2 lines) then history.
 Badge = waiting count + unread errors.
