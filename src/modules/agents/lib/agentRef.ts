@@ -45,8 +45,8 @@ function relativize(absPath: string, agentCwd?: string | null): string {
 
 /**
  * Stage `text` into the PTY of the most-recently-active Claude session, falling
- * back to `fallbackLeafId` when no agent session is tracked. Prefers a session
- * "waiting" for input over one still "working", breaking ties by recency.
+ * back to `fallbackLeafId` when no agent session is tracked. Prefers an idle
+ * session (waiting or done) over one still "working", breaking ties by recency.
  * Returns true when the text was written, false (with a toast) otherwise.
  */
 export function sendToActiveAgent(
@@ -63,16 +63,16 @@ export function sendToActiveAgent(
 
 /**
  * Resolve the leaf that should receive a handoff: the most-recently-active
- * agent session (preferring one "waiting" for input over one "working"), or
- * `fallbackLeafId` when no session is tracked.
+ * agent session (preferring an idle session, waiting or done, over one still
+ * working), or `fallbackLeafId` when no session is tracked.
  */
 export function pickAgentLeafId(fallbackLeafId: number | null): number | null {
   const sessions = Object.values(useAgentStore.getState().sessions);
   if (sessions.length === 0) return fallbackLeafId;
   const best = sessions.reduce((acc, s) => {
-    const accWaiting = acc.status === "waiting";
-    const sWaiting = s.status === "waiting";
-    if (sWaiting !== accWaiting) return sWaiting ? s : acc;
+    const accReady = acc.status !== "working";
+    const sReady = s.status !== "working";
+    if (sReady !== accReady) return sReady ? s : acc;
     return s.lastActivityAt > acc.lastActivityAt ? s : acc;
   });
   return best.leafId;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentRef } from "./agentRef";
+import { buildAgentRef, pickAgentLeafId } from "./agentRef";
+import { useAgentStore } from "@/modules/agents/store/agentStore";
 
 describe("buildAgentRef", () => {
   it("formats a single-line range with #L<start>", () => {
@@ -52,5 +53,25 @@ describe("buildAgentRef", () => {
       expect(out).not.toContain("\n");
       expect(out).not.toContain("\r");
     }
+  });
+});
+
+describe("pickAgentLeafId", () => {
+  it("pickAgentLeafId prefers a ready (done) session over a working one", () => {
+    useAgentStore.setState({ sessions: {}, notifications: [] });
+    const s = useAgentStore.getState();
+    s.start(1, 10, "claude"); // leaf 1: will be working
+    s.start(2, 11, "claude"); // leaf 2: will be done
+    s.setStatus(1, "working");
+    s.setStatus(2, "done");
+    // Make the WORKING one the most recently active, to prove readiness wins over recency.
+    useAgentStore.setState((st) => ({
+      sessions: {
+        ...st.sessions,
+        1: { ...st.sessions[1], lastActivityAt: 1000 },
+        2: { ...st.sessions[2], lastActivityAt: 1 },
+      },
+    }));
+    expect(pickAgentLeafId(null)).toBe(2);
   });
 });
