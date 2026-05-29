@@ -17,6 +17,14 @@ import { useActivityStore } from "../store/activityStore";
 const POLL_MS = 1500;
 
 type AgentStateEvent = { pane: string; state: ActivityState };
+type AgentMetaEvent = {
+  pane: string;
+  tool?: string;
+  cwd?: string;
+  session?: string;
+  transcript?: string;
+  file?: string;
+};
 
 /** Collect every leaf uuid in a pane tree. */
 function leafUuids(node: PaneNode): string[] {
@@ -62,6 +70,28 @@ export function AgentActivityBridge({
     listen<AgentStateEvent>("terax:agent-state", (e) => {
       const { pane, state } = e.payload;
       useActivityStore.getState().applyHook(pane, state, Date.now());
+    })
+      .then((u) => {
+        if (alive) unlisten = u;
+        else u();
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
+
+  // Structured hook meta (tool / cwd / session / transcript) on the same socket,
+  // delivered on a separate event so it never touches the state contract.
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    listen<AgentMetaEvent>("terax:agent-meta", (e) => {
+      const { pane, tool, cwd, session, transcript, file } = e.payload;
+      useActivityStore
+        .getState()
+        .setMeta(pane, { tool, cwd, session, transcript, file });
     })
       .then((u) => {
         if (alive) unlisten = u;

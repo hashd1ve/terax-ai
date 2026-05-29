@@ -29,7 +29,10 @@ export type ShortcutId =
   | "settings.open"
   | "sidebar.toggle"
   | "editor.undo"
-  | "editor.redo";
+  | "editor.redo"
+  | "agent.sendSelection"
+  | "agent.quickPrompt"
+  | "agent.dashboard";
 
 export type ShortcutGroup =
   | "General"
@@ -38,7 +41,8 @@ export type ShortcutGroup =
   | "Terminal"
   | "Search"
   | "View"
-  | "Editor";
+  | "Editor"
+  | "Agent";
 
 export type KeyBinding = {
   key: string;
@@ -223,6 +227,24 @@ export const SHORTCUTS: Shortcut[] = [
     group: "Editor",
     defaultBindings: [{ [MOD_PROP]: true, key: "y" }],
   },
+  {
+    id: "agent.sendSelection",
+    label: "Send selection to Claude",
+    group: "Agent",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "l" }],
+  },
+  {
+    id: "agent.quickPrompt",
+    label: "Open quick-prompt palette",
+    group: "Agent",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "a" }],
+  },
+  {
+    id: "agent.dashboard",
+    label: "Open agent dashboard",
+    group: "Agent",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "g" }],
+  },
 ];
 
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
@@ -233,6 +255,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   "View",
   "Search",
   "Editor",
+  "Agent",
 ];
 
 /**

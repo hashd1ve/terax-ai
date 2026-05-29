@@ -22,6 +22,7 @@ export function folderForTab(tab: Tab): string | null {
     case "git-commit-file":
       return tab.repoRoot;
     case "preview":
+    case "agent-dashboard":
       return null;
   }
 }

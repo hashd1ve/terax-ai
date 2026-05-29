@@ -33,7 +33,7 @@ export function HtmlPreviewPane({ path, visible }: Props) {
   }, [visible]);
 
   // Auto-reload when this exact file is written from anywhere inside Terax
-  // (editor save, AI tool, external watcher echo). Cheap: one listener per
+  // (editor save, external watcher echo). Cheap: one listener per
   // pane, filter is a string compare.
   useEffect(() => {
     type FileWrittenPayload = { path: string; source?: string };

@@ -1,4 +1,8 @@
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import {
+  DEFAULT_QUICK_PROMPTS,
+  type QuickPrompt,
+} from "@/modules/agents/lib/quickPrompts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -56,9 +60,12 @@ export type Preferences = {
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
+  /** Per-pane context/cost overlay for terminals running a coding agent. */
+  hudEnabled: boolean;
   /** True once the user dismissed the "install tmux for persistence" notice. */
   tmuxNoticeDismissed: boolean;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
+  quickPrompts: QuickPrompt[];
 };
 
 const STORE_PATH = "terax-settings.json";
@@ -82,8 +89,10 @@ const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
+const KEY_HUD_ENABLED = "hudEnabled";
 const KEY_TMUX_NOTICE_DISMISSED = "tmuxNoticeDismissed";
 const KEY_SHORTCUTS = "shortcuts";
+const KEY_QUICK_PROMPTS = "quickPrompts";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -120,8 +129,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
+  hudEnabled: true,
   tmuxNoticeDismissed: false,
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
+  quickPrompts: DEFAULT_QUICK_PROMPTS,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -192,12 +203,20 @@ export async function loadPreferences(): Promise<Preferences> {
     agentNotifications:
       get<boolean>(KEY_AGENT_NOTIFICATIONS) ??
       DEFAULT_PREFERENCES.agentNotifications,
+    hudEnabled:
+      get<boolean>(KEY_HUD_ENABLED) ?? DEFAULT_PREFERENCES.hudEnabled,
     tmuxNoticeDismissed:
       get<boolean>(KEY_TMUX_NOTICE_DISMISSED) ??
       DEFAULT_PREFERENCES.tmuxNoticeDismissed,
     shortcuts:
       get<Record<ShortcutId, KeyBinding[]>>(KEY_SHORTCUTS) ??
       DEFAULT_PREFERENCES.shortcuts,
+    quickPrompts: (() => {
+      const stored = get<QuickPrompt[]>(KEY_QUICK_PROMPTS);
+      return Array.isArray(stored) && stored.length > 0
+        ? stored
+        : DEFAULT_PREFERENCES.quickPrompts;
+    })(),
   };
 }
 
@@ -306,6 +325,10 @@ export async function setAgentNotifications(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_NOTIFICATIONS, value);
 }
 
+export async function setHudEnabled(value: boolean): Promise<void> {
+  await writePref(KEY_HUD_ENABLED, value);
+}
+
 export async function setTmuxNoticeDismissed(value: boolean): Promise<void> {
   await writePref(KEY_TMUX_NOTICE_DISMISSED, value);
 }
@@ -318,6 +341,10 @@ export async function setShortcuts(
 
 export async function resetShortcuts(): Promise<void> {
   await writePref(KEY_SHORTCUTS, DEFAULT_PREFERENCES.shortcuts);
+}
+
+export async function setQuickPrompts(value: QuickPrompt[]): Promise<void> {
+  await writePref(KEY_QUICK_PROMPTS, value);
 }
 
 export type PrefKey = keyof Preferences;
@@ -346,8 +373,10 @@ export async function onPreferencesChange(
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
+    [KEY_HUD_ENABLED]: "hudEnabled",
     [KEY_TMUX_NOTICE_DISMISSED]: "tmuxNoticeDismissed",
     [KEY_SHORTCUTS]: "shortcuts",
+    [KEY_QUICK_PROMPTS]: "quickPrompts",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

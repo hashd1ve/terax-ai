@@ -1,30 +1,73 @@
 use serde_json::{json, Value};
 
-// (claude event, notify-bell OSC marker, activity-indicator state)
-const HOOK_EVENTS: [(&str, &str, &str); 5] = [
-    ("UserPromptSubmit", "working", "working"),
-    ("PreToolUse", "working", "working"),
-    ("Notification", "attention", "blocked"),
-    ("Stop", "finished", "done"),
-    ("SubagentStop", "finished", "done"),
+// (claude event, notify-bell OSC marker, activity-indicator state).
+// A `None` marker installs no notification-bell sequence; a `None` state sends
+// no activity state, used for meta-only events (SessionStart/SessionEnd) that
+// must carry session/transcript data without flapping the working/blocked/done
+// indicator.
+const HOOK_EVENTS: [(&str, Option<&str>, Option<&str>); 10] = [
+    ("UserPromptSubmit", Some("working"), Some("working")),
+    ("PreToolUse", Some("working"), Some("working")),
+    ("Notification", Some("attention"), Some("blocked")),
+    ("Stop", Some("finished"), Some("done")),
+    ("SubagentStop", Some("finished"), Some("done")),
+    ("SessionStart", None, None),
+    ("SessionEnd", None, None),
+    // After a tool runs: meta-only (no bell, no state flap, PreToolUse already
+    // set working) to carry the edited file_path for the Edit Inbox.
+    ("PostToolUse", None, None),
+    // A failed tool call: bell-only (no socket state) so it lands in history as
+    // "failed" without flapping the working/blocked/done indicator.
+    ("PostToolUseFailure", Some("error"), None),
+    // Blocked waiting for the user to allow/deny a tool: the actionable case,
+    // routed like attention (toast when hidden, OS-notify when unfocused).
+    ("PermissionRequest", Some("attention"), Some("blocked")),
 ];
 
-// Includes the pre-v2.1.139 /dev/tty variant so re-running migrates it.
-const OWNED_MARKERS: [&str; 2] = ["notify;Terax;", "terax;notify"];
+// A command is ours if it carries one of these. "notify;Terax;" tags the
+// bell-bearing hooks; "TERAX_AGENT_SOCK" tags every socket-reporting hook
+// (including meta-only ones that have no bell marker); "terax;notify" is the
+// pre-v2.1.139 /dev/tty variant kept so re-running migrates it.
+const OWNED_MARKERS: [&str; 3] = ["notify;Terax;", "TERAX_AGENT_SOCK", "terax;notify"];
 
-// Two effects, joined so a single command merges into one settings.json entry:
-//   1) OSC 777 marker via `terminalSequence` (existing notification bell);
-//      gated on TERAX_TERMINAL, no-op outside Terax. Uses terminalSequence
-//      because hooks lost /dev/tty access in v2.1.139.
-//   2) A per-pane JSON line to the activity socket when in a Terax pane, so the
-//      tab indicator gets precise state. Best-effort: a missing/closed socket
-//      or absent python3 is a silent no-op and never blocks the agent.
-fn hook_cmd(marker: &str, state: &str) -> String {
-    format!(
-        r#"[ -n "$TERAX_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Terax;{marker}\\u0007"}}' ; [ -n "$TERAX_PANE" ] && [ -n "$TERAX_AGENT_SOCK" ] && python3 -c 'import socket,sys,json,os
+// Up to two best-effort effects per fire, merged into one settings.json command:
+//   1) When `marker` is set: an OSC 777 sequence via Claude's `terminalSequence`
+//      field (drives the notification bell), gated on TERAX_TERMINAL. Uses
+//      terminalSequence because hooks lost /dev/tty access in v2.1.139.
+//   2) A structured JSON line to the per-pane activity socket: always the pane,
+//      the `state` when set, plus tool_name/cwd/session_id/transcript_path read
+//      from the hook's stdin JSON (Claude passes hook input on stdin). A
+//      missing/closed socket, absent python3, or a tty stdin is a silent no-op
+//      and never blocks the agent.
+fn hook_cmd(marker: Option<&str>, state: Option<&str>) -> String {
+    let bell = match marker {
+        Some(m) => format!(
+            r#"[ -n "$TERAX_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Terax;{m}\\u0007"}}' ; "#
+        ),
+        None => String::new(),
+    };
+    let set_state = match state {
+        Some(s) => format!(r#"m["state"]="{s}";"#),
+        None => String::new(),
+    };
+    let py = format!(
+        r#"import socket,sys,json,os
 try:
- s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(0.2);s.connect(os.environ["TERAX_AGENT_SOCK"]);s.sendall((json.dumps({{"pane":os.environ["TERAX_PANE"],"state":"{state}"}})+"\n").encode());s.close()
-except OSError: pass' 2>/dev/null ; true"#
+ d=json.loads(sys.stdin.read() or "{{}}") if not sys.stdin.isatty() else {{}}
+except Exception:
+ d={{}}
+m={{"pane":os.environ["TERAX_PANE"]}};{set_state}
+for k,src in (("tool","tool_name"),("cwd","cwd"),("session","session_id"),("transcript","transcript_path")):
+ v=d.get(src)
+ if v: m[k]=v
+ti=d.get("tool_input")
+if isinstance(ti,dict) and ti.get("file_path"): m["file"]=ti["file_path"]
+try:
+ s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(0.2);s.connect(os.environ["TERAX_AGENT_SOCK"]);s.sendall((json.dumps(m)+"\n").encode());s.close()
+except OSError: pass"#
+    );
+    format!(
+        r#"{bell}[ -n "$TERAX_PANE" ] && [ -n "$TERAX_AGENT_SOCK" ] && python3 -c '{py}' 2>/dev/null ; true"#
     )
 }
 
@@ -127,7 +170,8 @@ pub fn agent_claude_hooks_status() -> bool {
     };
     HOOK_EVENTS
         .iter()
-        .all(|(_, m, _)| content.contains(&format!("notify;Terax;{m}")))
+        .filter_map(|(_, m, _)| *m)
+        .all(|m| content.contains(&format!("notify;Terax;{m}")))
 }
 
 #[cfg(test)]
@@ -164,9 +208,62 @@ mod tests {
         assert_eq!(hook_count(&out, "PreToolUse"), 1);
         assert_eq!(hook_count(&out, "SubagentStop"), 1);
         assert!(command(&out, "PreToolUse", 0).contains("notify;Terax;working"));
-        assert!(command(&out, "Stop", 0).contains(r#""state":"done""#));
-        assert!(command(&out, "Notification", 0).contains(r#""state":"blocked""#));
+        assert!(command(&out, "Stop", 0).contains(r#"m["state"]="done""#));
+        assert!(command(&out, "Notification", 0).contains(r#"m["state"]="blocked""#));
         assert!(command(&out, "UserPromptSubmit", 0).contains("TERAX_AGENT_SOCK"));
+    }
+
+    #[test]
+    fn enriches_socket_payload_from_hook_stdin() {
+        let out = merge_hooks(json!({}));
+        let cmd = command(&out, "PreToolUse", 0);
+        // The python one-liner reads the hook JSON on stdin and forwards meta.
+        assert!(cmd.contains("sys.stdin"));
+        assert!(cmd.contains("json.loads"));
+        assert!(cmd.contains("tool_name"));
+        assert!(cmd.contains("session_id"));
+        assert!(cmd.contains("transcript_path"));
+        assert!(cmd.contains("tool_input"));
+        assert!(cmd.contains("file_path"));
+    }
+
+    #[test]
+    fn installs_meta_only_session_events_without_bell_or_state() {
+        let out = merge_hooks(json!({}));
+        assert_eq!(hook_count(&out, "SessionStart"), 1);
+        assert_eq!(hook_count(&out, "SessionEnd"), 1);
+        let start = command(&out, "SessionStart", 0);
+        // Meta-only: carries the socket reporter but no bell marker and no state.
+        assert!(start.contains("TERAX_AGENT_SOCK"));
+        assert!(start.contains("session_id"));
+        assert!(!start.contains("notify;Terax;"));
+        assert!(!start.contains(r#"m["state"]"#));
+    }
+
+    #[test]
+    fn installs_failure_and_permission_events() {
+        let out = merge_hooks(json!({}));
+        assert_eq!(hook_count(&out, "PostToolUseFailure"), 1);
+        assert_eq!(hook_count(&out, "PermissionRequest"), 1);
+        // Failure is bell-only: error marker, no socket activity state.
+        let fail = command(&out, "PostToolUseFailure", 0);
+        assert!(fail.contains("notify;Terax;error"));
+        assert!(!fail.contains(r#"m["state"]"#));
+        // Permission is the actionable case: attention bell + blocked indicator.
+        let perm = command(&out, "PermissionRequest", 0);
+        assert!(perm.contains("notify;Terax;attention"));
+        assert!(perm.contains(r#"m["state"]="blocked""#));
+    }
+
+    #[test]
+    fn status_ignores_meta_only_events() {
+        // SessionStart/SessionEnd carry no bell marker, so the status check must
+        // not require them. A config with only the bell-bearing markers passes.
+        let out = merge_hooks(json!({}));
+        let serialized = serde_json::to_string(&out).unwrap();
+        for m in ["working", "attention", "finished"] {
+            assert!(serialized.contains(&format!("notify;Terax;{m}")));
+        }
     }
 
     #[test]
@@ -223,7 +320,7 @@ mod tests {
             "hooks": {
                 "Notification": [
                     { "hooks": [] },
-                    { "hooks": [ { "type": "command", "command": hook_cmd("attention", "blocked") } ] }
+                    { "hooks": [ { "type": "command", "command": hook_cmd(Some("attention"), Some("blocked")) } ] }
                 ]
             }
         });
@@ -247,5 +344,78 @@ mod tests {
             existing_config(Some(r#"{"permissions":{}}"#), p).unwrap(),
             json!({ "permissions": {} })
         );
+    }
+
+    // Extract the python body between `python3 -c '` and `' 2>/dev/null`.
+    // Safe because the generated body contains no single quotes.
+    fn extract_python(cmd: &str) -> String {
+        let open = "python3 -c '";
+        let start = cmd.find(open).expect("python invocation") + open.len();
+        let rest = &cmd[start..];
+        let end = rest.find("' 2>/dev/null").expect("python terminator");
+        rest[..end].to_string()
+    }
+
+    // Runs the generated python with a sample hook JSON on stdin and a real
+    // listening socket, asserting the emitted line carries both the activity
+    // state and the structured meta. Locks the shell/python/Rust escaping, the
+    // riskiest part of the channel. Gated: skipped if python3 is unavailable.
+    #[cfg(unix)]
+    #[test]
+    fn hook_python_forwards_state_and_meta_over_socket() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixListener;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        if std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let sock = std::env::temp_dir().join(format!("terax-hook-{}-{n}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+
+        let py = extract_python(&hook_cmd(Some("working"), Some("working")));
+        let mut child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(&py)
+            .env("TERAX_PANE", "pane-1")
+            .env("TERAX_AGENT_SOCK", &sock)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                br#"{"tool_name":"Edit","session_id":"sid","transcript_path":"/t.jsonl","cwd":"/proj","tool_input":{"file_path":"/proj/x.ts"}}"#,
+            )
+            .unwrap();
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).unwrap();
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&sock);
+
+        let line = buf.trim();
+        let state =
+            crate::modules::agent_sock::parse_state_line(line).expect("valid state line");
+        assert_eq!(state.state, "working");
+        assert_eq!(state.pane, "pane-1");
+        let meta =
+            crate::modules::agent_sock::parse_meta_line(line).expect("valid meta line");
+        assert_eq!(meta.tool.as_deref(), Some("Edit"));
+        assert_eq!(meta.session.as_deref(), Some("sid"));
+        assert_eq!(meta.transcript.as_deref(), Some("/t.jsonl"));
+        assert_eq!(meta.cwd.as_deref(), Some("/proj"));
+        assert_eq!(meta.file.as_deref(), Some("/proj/x.ts"));
     }
 }

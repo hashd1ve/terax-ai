@@ -4,7 +4,7 @@ Terax loads `TERAX.md` from the workspace root as agent memory (similar to AGENT
 
 ## Project
 
-**Terax** — open-source AI-native terminal emulator. Tauri 2 + Rust (`portable-pty`) backend, React 19 + TypeScript + xterm.js (webgl) client, BYOK AI via Vercel AI SDK v6.
+**Terax** - open-source, lightweight terminal-first dev workspace (Tauri 2 + Rust `portable-pty` backend, React 19 + TypeScript + xterm.js webgl client) with first-class Claude Code integration.
 
 - Bundle id: `app.crynta.terax`
 - Package manager: **pnpm**
@@ -18,11 +18,11 @@ Production-grade or it does not ship. Every change is judged against all of thes
 
 - **Correctness**: edge cases, failure modes, concurrent access. No "works for now".
 - **Performance**: ultra-lightweight is the product. ~7-8 MB bundle, high-performance terminal. For every change ask: how much RAM it costs, whether it adds IPC round-trips or redundant requests, whether it triggers extra re-renders or wasted work, whether it pulls a heavy dependency. Unused features consume zero resources.
-- **Security**: no critical security holes. Validate at every boundary (IPC, fs, network, AI tool surface). The secret-path deny-list applies on both read and write and is never bypassed.
+- **Security**: no critical security holes. Validate at every boundary (IPC, fs, network).
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
 - **Architecture**: new or changed logic lives in pure, dependency-light functions (functional core); tauri commands and React components stay thin (imperative shell). Keeps it testable without a later rewrite.
 
-Verify before claiming done: `pnpm exec tsc --noEmit`, `pnpm test`, `cargo clippy`, `cargo test --locked`. A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC or AI tool surface) needs a test that locks the invariant.
+Verify before claiming done: `pnpm exec tsc --noEmit`, `pnpm test`, `cargo clippy`, `cargo test --locked`. A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC) needs a test that locks the invariant.
 
 ## Conventions
 
@@ -42,11 +42,8 @@ Verify before claiming done: `pnpm exec tsc --noEmit`, `pnpm test`, `cargo clipp
 - `fs::tree::*` (`fs_read_dir`, `list_subdirs`), `fs::file::*` (`fs_read_file`, `fs_write_file`, `fs_stat`, `fs_canonicalize`), `fs::mutate::*` (`fs_create_file`, `fs_create_dir`, `fs_rename`, `fs_delete`): file explorer + editor IO.
 - `fs::search::*` (`fs_search`, `fs_list_files`), `fs::grep::*` (`fs_grep`, `fs_glob`): fuzzy file finder + content search (powered by `ignore` + `grep-*` crates).
 - `git::commands::*`: full source-control surface (`git_status`, `git_diff`, `git_diff_content`, `git_stage`, `git_unstage`, `git_discard`, `git_commit`, `git_fetch`, `git_pull_ff_only`, `git_push`, `git_log`, `git_show_commit`, `git_commit_files`, `git_commit_file_diff`, `git_panel_snapshot`, `git_resolve_repo`, `git_remote_url`). All gated through the workspace authorization registry.
-- `shell::shell_run_command`: one-shot subshell exec used by AI tools. Distinct from PTY sessions; not the user's interactive terminal. On Windows via PowerShell (`-NoProfile -Command`), on Unix via `$SHELL -lc`. Shared helper `build_oneshot_command`.
-- `shell::shell_session_*`: persistent agent shell with state across calls. `shell::shell_bg_*` (`spawn`, `logs`, `kill`, `list`): long-running background processes (dev servers etc.) with bounded ring-buffer log capture.
-- `workspace::*`: `workspace_authorize` / `workspace_current_dir` (the spawn/git/AI cwd authorization registry) plus the WSL bridge (`wsl_list_distros`, `wsl_default_distro`, `wsl_home`).
-- `net::*` (`ai_http_request`, `ai_http_stream`, `lm_ping`): AI HTTP proxy with SSRF guard; keeps provider calls and local-model pings off the webview.
-- `secrets::secrets_*`: OS keychain via the `keyring` crate. Service constant `terax-ai`. Linux uses a file-based fallback gated behind `#[cfg(target_os = "linux")]`.
+- `workspace::*`: `workspace_authorize` / `workspace_current_dir` (the spawn/git cwd authorization registry) plus the WSL bridge (`wsl_list_distros`, `wsl_default_distro`, `wsl_home`).
+- `agent::*` / `agent_sessions::*` / `agent_todos::*` / `agent_usage::*`: the Claude Code integration surface (see "Claude Code integration" below). `agent_enable_claude_hooks` installs the hooks; `claude_sessions_list`, `agent_read_todos`, `agent_read_usage` are read-only and path-validated under `~/.claude` (kill(pid,0) liveness, bounded reads, traversal rejected).
 - `open_settings_window`: separate webview window for Settings (optional `tab` arg deep-links a section).
 
 ### PTY shell integration
@@ -62,11 +59,9 @@ ConPTY on Windows requires `SPAWN_LOCK` (Mutex) around `openpty + spawn_command`
 
 Each ConPTY child is also assigned to a per-session **Job Object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`pty/job.rs`). When the Job HANDLE drops — clean shutdown, panic, or even SIGKILL'd Terax process — the kernel kills every descendant of the shell (e.g. `npm run dev` spawned from inside pwsh). Without this Windows orphans the entire process subtree because `TerminateProcess` only kills the immediate child. macOS/Linux rely on `Drop for Session → killer.kill()`; on dev-`Ctrl-C` of `cargo run` destructors don't fire and orphans are possible there too — acceptable for now since dev only.
 
-`AiComposerProvider` is mounted unconditionally at the App.tsx root: a conditional wrapper would change the parent element type when keys load, remounting the entire tree (and re-spawning every PTY) the moment `getAllKeys()` resolves. Production happened to dodge this because keychain reads can land in the same paint frame; dev didn't. Keep the unconditional wrap.
-
 ### Frontend (`src/`)
 
-Single-window React app. Path alias `@/*` → `src/*`. Tabs are a tagged union (`kind`: `terminal` | `editor` | `preview` | `markdown` | `ai-diff` | `git-diff` | `git-history` | `git-commit-file`) and **not** unmounted on switch — they're hidden via `invisible pointer-events-none` so PTYs and dev servers keep streaming in the background.
+Single-window React app. Path alias `@/*` → `src/*`. Tabs are a tagged union (`kind`: `terminal` | `editor` | `preview` | `html-preview` | `markdown` | `git-diff` | `git-history` | `git-commit-file` | `agent-dashboard`) and **not** unmounted on switch — they're hidden via `invisible pointer-events-none` so PTYs and dev servers keep streaming in the background.
 
 `App.tsx` wires modules together — keep it a coordinator. New features go inside the appropriate `modules/<area>/`.
 
@@ -80,8 +75,8 @@ Each module is self-contained, exports a thin barrel via `index.ts`, and owns it
 - **preview/** — auto-detected dev-server preview tab (status-bar pill suggests opening when a localhost URL is detected).
 - **tabs/** — `useTabs` is the source of truth for tab list + active id. `useWorkspaceCwd` derives explorer root + inherited cwd for new tabs from active tab. `basename` splits on both `/` and `\`.
 - **header/** — top bar + inline search (`SearchInline` adapts to terminal vs editor via `SearchTarget`). `WindowControls` rendered when `USE_CUSTOM_WINDOW_CONTROLS` is true (Linux + Windows; macOS uses native traffic lights).
-- **statusbar/** — bottom bar, `CwdBreadcrumb` (handles Unix paths, Windows drive letters, and home `~` segments via `pathUtils.segmentsFromCwd`), AI tools indicator.
-- **shortcuts/** — keymap registry (`shortcuts.ts`) + `useGlobalShortcuts`. Handlers live in `App.tsx` and are passed in by id (`tab.new`, `ai.toggle`, …). `metaKey || ctrlKey` for cross-platform Cmd/Ctrl.
+- **statusbar/** — bottom bar, `CwdBreadcrumb` (handles Unix paths, Windows drive letters, and home `~` segments via `pathUtils.segmentsFromCwd`).
+- **shortcuts/** — keymap registry (`shortcuts.ts`) + `useGlobalShortcuts`. Handlers live in `App.tsx` and are passed in by id (`tab.new`, `search.focus`, `agent.dashboard`, …). `metaKey || ctrlKey` for cross-platform Cmd/Ctrl.
 - **settings/** — settings store (`store.ts` via `tauri-plugin-store`), preferences hook, settings window opener.
 - **sidebar/** — activity bar + collapsible side panels (explorer, source control, git history).
 - **source-control/** — git status / stage / commit panel and diff workflow.
@@ -89,28 +84,26 @@ Each module is self-contained, exports a thin barrel via `index.ts`, and owns it
 - **markdown/** — markdown preview renderer (backs the `markdown` tab kind).
 - **workspace/** — workspace environment switching (Local + WSL distros).
 - **theme/** — custom theme engine (no `next-themes`). `ThemeProvider` + `applyTheme` write CSS variables; built-in presets in `themes/` (terax-default, nord, tide, catppuccin, tokyo-night, caffeine, claude, gruvbox, sage, rose-pine), user themes via `customThemes.ts` + `validateTheme.ts`, optional background image via `bgImageStore.ts` + `SurfaceLayer`.
-- **agents/** — agent notifications + management for both the built-in Terax agent and terminal coding-agents (Claude Code; Codex later). Shared store (`store/agentStore.ts`: terminal `sessions` + `localAgent` + `notifications`) and a shared router (`lib/route.ts`: suppress when focused-and-visible, OS-notify when unfocused, in-app Sonner toast when focused-but-hidden) feed the header `NotificationBell` (management surface, Terax agent listed first). Toasts use Sonner (`components/ui/sonner.tsx`) themed via the central engine; `lib/agentIcon.tsx` renders the per-agent brand mark (Terax logo, Claude/Codex hugeicon). Terminal detection is Rust-side (`pty/agent_detect.rs`) on the PTY reader's byte filter, armed on `OSC 133;C;<cmd>`, emitting `terax:agent-signal` transitions (`started`/`working`/`attention`/`finished`/`exited`) driven only by OSC sequences (never raw output, so a repainting TUI never flaps) — zero cost when no agent runs. Terminal signals arrive via Claude Code hooks (`UserPromptSubmit`/`Notification`/`Stop`) returning an `OSC 777` marker through the `terminalSequence` field (hooks lost `/dev/tty` access in v2.1.139); `agent_enable_claude_hooks` installs them (atomic write, never clobbers invalid JSON, prunes empty groups), gated on `TERAX_TERMINAL`, and the marker self-arms the detector so it works in bash/Windows/tmux without shell preexec. The Terax agent path is `ai/components/LocalAgentNotificationsBridge.tsx`, mapping `chatStore.agentMeta` (`awaiting-approval`→attention, busy→idle→finished, `error`) into the same router.
-- **ai/** — see below.
+- **agents/** — notifications, activity, and management for terminal coding-agents (Claude Code; Codex later). Stores: `store/agentStore.ts` (terminal `sessions` + capped `notifications`), `store/activityStore.ts` (per-leaf activity state, hook meta, and `changedFiles`), `store/usageStore.ts` (per-leaf transcript usage), `store/todosStore.ts` (per-session plan). A shared router (`lib/route.ts`: suppress when focused-and-visible, OS-notify when unfocused, in-app Sonner toast when focused-but-hidden) feeds the header `NotificationBell` and `SessionSwitcher`. Toasts use Sonner (`components/ui/sonner.tsx`); `lib/agentIcon.tsx` renders the per-agent brand mark (Claude/Codex hugeicon). Terminal detection is Rust-side (`pty/agent_detect.rs`) on the PTY reader's byte filter, armed on `OSC 133;C;<cmd>`, emitting `terax:agent-signal` transitions (`started`/`working`/`attention`/`finished`/`error`/`exited`) driven only by OSC sequences (never raw output, so a repainting TUI never flaps), zero cost when no agent runs. See "Claude Code integration" below for the hook channel and the features built on it.
 
-### AI subsystem (`src/modules/ai/`)
+### Claude Code integration
 
-BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebras, Groq**, plus **OpenAI-compatible** for any custom base URL. Local / offline providers (key-optional, model id supplied at runtime): **LM Studio, MLX, Ollama**. Provider list in `config.ts` (`PROVIDERS`); model registry includes `DEFAULT_MODEL_ID` + `DEFAULT_AUTOCOMPLETE_MODEL`.
+Terax is a host for Claude Code running inside a PTY. It never makes its own model calls; it observes the agent and feeds the PTY.
 
-- **Key storage**: OS keychain via `keyring` (Rust). Frontend reads/writes through `secrets_*` commands. Service `KEYRING_SERVICE = "terax-ai"`. Never persist keys to disk, settings store, or `localStorage`.
-- **Agent** (`lib/agent.ts`): `Experimental_Agent` with `stopWhen: stepCountIs(MAX_AGENT_STEPS)` and the system prompt from `config.ts`. Provider branching happens here — keep the `Agent` / `DirectChatTransport` shape; the rest of the system depends on AI SDK v6 chat semantics.
-- **Sub-agents** (`agents/registry.ts`, `agents/runSubagent.ts`): named sub-agents with their own system prompts and tool subsets, invoked by the main agent via `run_subagent` tool.
-- **Sessions** (`lib/sessions.ts` + `store/chatStore.ts`): conversations are organized into named sessions, persisted via `tauri-plugin-store` at `terax-ai-sessions.json` (list + `activeId` + per-session `messages:<id>` keys). `chatStore.ts` keeps a module-scoped `Map<sessionId, Chat<UIMessage>>`; `getOrCreateChat(apiKey, sessionId)` lazily constructs a `Chat`, seeded with messages from a hydration map populated by `hydrateSessions()` (called once from `App.tsx`). `AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message. Switching the API key wipes the chat map; sessions persist.
-- **Composer** (`lib/composer.tsx`): React context providing shared input state (text, attachments, voice) for both the docked `AiInputBar` and any other surface. Attachments include image, text-file, and `selection` kinds — selections come from `useChatStore.attachSelection(text, source)` (drained into chips, not pasted into the textarea) and are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit. Composer derives `isBusy` from `agentMeta.status` so it can mount safely before sessions hydrate.
-- **Voice input**: streamed transcription pipeline. Toggled from the composer.
-- **Live context bridge**: `App.tsx` calls `setLive({ getCwd, getTerminalContext, … })` so tools can read the *currently active* terminal's cwd + last 300 lines of buffer. Lazy by design — don't pre-snapshot.
-- **Tools** (`tools/tools.ts`): `read_file`, `list_directory`, `fs_search`, `fs_grep` auto-execute. `write_file`, `create_directory`, `rename`, `delete`, `run_command`, `shell_session_run`, `shell_bg_spawn` set `needsApproval: true` and the AI SDK pauses for an in-UI confirmation card. Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`. `lib/security.ts` is a deny-list refusing obvious secret paths (`.env*`, `.ssh/`, credentials, keychain dirs) — apply on **both** read and write paths and don't bypass it.
-- **Edit diffs**: AI-proposed edits open in a side-by-side diff tab (`ai-diff` tab kind); user accepts/rejects per hunk before the write tool actually runs.
-- **Skills / snippets**: reusable prompt fragments + tool-bundles surfaced in the composer.
+- **Hook channel.** `agent_enable_claude_hooks` installs hooks into `~/.claude/settings.json` (atomic write, never clobbers invalid JSON, prunes empty groups, migrates the legacy `/dev/tty` variant). `HOOK_EVENTS` (`agent.rs`) covers `UserPromptSubmit`/`PreToolUse`/`Notification`/`Stop`/`SubagentStop` (bell marker + activity state), `SessionStart`/`SessionEnd`/`PostToolUse` (meta-only, no bell, no state flap), `PostToolUseFailure` (bell-only `error`), and `PermissionRequest` (attention/blocked). Each fire does two best-effort things: an `OSC 777` `terminalSequence` marker for the bell (gated on `TERAX_TERMINAL`), and a JSON line to the per-pane Unix socket. The socket python reads the hook's stdin JSON and forwards `tool_name`/`cwd`/`session_id`/`transcript_path`/`tool_input.file_path`; a tty stdin or absent python3 is a silent no-op. `OWNED_MARKERS` includes `TERAX_AGENT_SOCK` so meta-only hooks are still recognized for idempotent merge.
+- **Socket parsing** (`agent_sock.rs`) reads each line twice without coupling: `parse_state_line` keeps the strict `{pane,state}` `VALID_STATES` contract and emits `terax:agent-state`; `parse_meta_line` emits `terax:agent-meta` with the optional structured fields. Never widen `VALID_STATES` to carry non-state data. The frontend `AgentActivityBridge` writes state via `applyHook` and meta via `setMeta` (merges only present fields).
+- **Failure / permission routing.** `PostToolUseFailure` self-arms and emits `Transition::Error` -> a quiet red "failed" row in the bell history only (never toasts/OS-notifies, since failures are routine). `PermissionRequest` routes like attention. Approving is just focusing the pane; Terax never injects accept/deny keystrokes.
+- **Send to Claude** (`lib/agentRef.ts`): `buildAgentRef` formats `@<path>#L<a>-<b>` (relative to the agent cwd, no trailing CR so it stages without submitting). Wired to the explorer context menu and an editor selection shortcut (`agent.sendSelection`, Cmd/Ctrl+Shift+L) via `writeToSession`.
+- **Session Switcher** (`components/SessionSwitcher.tsx` + `agent_sessions::claude_sessions_list`): lists `~/.claude/sessions/*.json`; liveness is `kill(pid,0)` on Unix (the file `status`/`updatedAt` are stale, not a heartbeat); resumes a dead session with `claude --resume <uuid>` after `whenSessionReady`.
+- **Quick-prompt palette** (`components/QuickPromptPalette.tsx`, `lib/quickPrompts.ts`, shortcut `agent.quickPrompt` Cmd/Ctrl+Shift+A): cmdk palette typing snippet bodies (placeholder substitution `{{file}}`/`{{branch}}`/`{{selection}}`) plus discovered `~/.claude` and project `.claude` slash-commands into the focused pane. Snippets persist in the settings store.
+- **Edit Inbox**: `PostToolUse` forwards the edited `file_path`; `activityStore.changedFiles` accumulates per leaf (deduped, capped, cleared at the start of each turn) and `TabBar` shows a chip that opens the files via `openFileTab`.
+- **Plan & Todo panel** (`components/PlanTodoPanel.tsx` + `agent_todos::agent_read_todos`): a third sidebar view ("Plan") showing the active session's `~/.claude/todos/<sessionId>-*.json` checklist, polled only while working.
+- **Per-pane HUD** (`components/AgentHud.tsx` + `agent_usage::agent_read_usage`): a read-only overlay showing context-window %, model, tokens, and an estimated cost, derived from a bounded tail of the session transcript JSONL (path-validated under `~/.claude/projects`). Deliberately does NOT install a `statusLine` (which would co-own the user's config). Gated on `hudEnabled` + an active agent + visibility; zero IPC/timer when idle.
+- **Cross-pane dashboard** (`components/AgentDashboard.tsx`, `agent-dashboard` tab, shortcut `agent.dashboard` Cmd/Ctrl+Shift+G or the SessionSwitcher footer): a mission-control board with one card per running agent (status, current tool, context %, changed-files count, elapsed), sorted blocked > working > done, each with a Focus action. Composes the existing stores reactively; no polling of its own. Not persisted to the workspace snapshot.
 
 ### UI conventions
 
 - **shadcn/ui** is configured (`components.json`, style `radix-luma`, base `mist`, icon lib **hugeicons**). Primitives in `src/components/ui/` — don't hand-edit; re-run `pnpm dlx shadcn add` to upgrade.
-- **AI Elements** (Vercel) live in `src/components/ai-elements/` from the `@ai-elements` registry in `components.json`. Same rule: regenerate, don't hand-patch — composition wrappers belong in `modules/ai/components/`.
 - **Tailwind v4** — no `tailwind.config.*`, config is in `src/App.css` via `@theme`. Use `cn()` from `@/lib/utils`.
 - Animation: `motion` (Framer Motion successor). Resizable layout: `react-resizable-panels`.
 - Path imports: always `@/…`, never relative across modules.

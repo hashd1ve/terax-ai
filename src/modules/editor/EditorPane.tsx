@@ -36,6 +36,9 @@ export type EditorPaneHandle = {
   clearQuery: () => void;
   focus: () => void;
   getSelection: () => string | null;
+  /** The current selection as a file path + 1-based line range, or null when
+   *  there is no view or the selection is empty. */
+  getSelectionRef: () => { path: string; startLine: number; endLine: number } | null;
   getPath: () => string;
   /** Re-read the file from disk. Skips silently if the buffer is dirty. */
   reload: () => boolean;
@@ -184,6 +187,18 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
           const { from, to } = view.state.selection.main;
           if (from === to) return null;
           return view.state.sliceDoc(from, to);
+        },
+        getSelectionRef: () => {
+          const view = cmRef.current?.view;
+          if (!view) return null;
+          const { from, to } = view.state.selection.main;
+          if (from === to) return null;
+          const doc = view.state.doc;
+          return {
+            path,
+            startLine: doc.lineAt(from).number,
+            endLine: doc.lineAt(to).number,
+          };
         },
         getPath: () => path,
         reload: () => reloadRef.current(),

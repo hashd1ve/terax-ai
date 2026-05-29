@@ -15,7 +15,11 @@ import {
 } from "@/modules/shortcuts/shortcuts";
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
-import { NotificationBell } from "@/modules/agents";
+import {
+  NotificationBell,
+  SessionSwitcher,
+  type ClaudeSession,
+} from "@/modules/agents";
 import {
   GridViewIcon,
   LayoutTwoColumnIcon,
@@ -47,11 +51,18 @@ type Props = {
   onRename: (id: number, title: string) => void;
   /** Override a tab's color (hue 0–360), or null to revert to the folder default. */
   onSetColor: (id: number, hue: number | null) => void;
+  /** Open the files a coding agent edited in a tab as pinned editor tabs. */
+  onOpenAgentFiles: (paths: string[]) => void;
   onToggleSidebar: () => void;
   onSplit: (dir: "row" | "col") => void;
   /** Active tab is a terminal and below the per-tab pane cap. */
   canSplit: boolean;
   onActivateAgent: (tabId: number, leafId: number) => void;
+  /** Normalized cwds of live terminal leaves, so the switcher can offer Activate. */
+  liveCwds: Set<string>;
+  onActivateSession: (session: ClaudeSession) => void;
+  onResumeSession: (session: ClaudeSession) => void;
+  onOpenDashboard: () => void;
   onOpenSettings: () => void;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
@@ -72,10 +83,15 @@ export function Header({
   onPin,
   onRename,
   onSetColor,
+  onOpenAgentFiles,
   onToggleSidebar,
   onSplit,
   canSplit,
   onActivateAgent,
+  liveCwds,
+  onActivateSession,
+  onResumeSession,
+  onOpenDashboard,
   onOpenSettings,
   searchTarget,
   searchRef,
@@ -179,9 +195,17 @@ export function Header({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!IS_MAC && <NotificationBell
-            onActivate={onActivateAgent}
-          />}
+        {!IS_MAC && (
+          <>
+            <NotificationBell onActivate={onActivateAgent} />
+            <SessionSwitcher
+              liveCwds={liveCwds}
+              onActivateSession={onActivateSession}
+              onResumeSession={onResumeSession}
+              onOpenDashboard={onOpenDashboard}
+            />
+          </>
+        )}
       </div>
 
       {!IS_MAC && <span className="mx-1 h-5 w-px shrink-0 bg-border" />}
@@ -205,6 +229,7 @@ export function Header({
           onPin={onPin}
           onRename={onRename}
           onSetColor={onSetColor}
+          onOpenAgentFiles={onOpenAgentFiles}
           compact={compact}
         />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
@@ -214,8 +239,12 @@ export function Header({
 
       {IS_MAC && (
         <>
-          <NotificationBell
-            onActivate={onActivateAgent}
+          <NotificationBell onActivate={onActivateAgent} />
+          <SessionSwitcher
+            liveCwds={liveCwds}
+            onActivateSession={onActivateSession}
+            onResumeSession={onResumeSession}
+            onOpenDashboard={onOpenDashboard}
           />
           {settingsButton}
         </>

@@ -1,6 +1,6 @@
 mod modules;
 
-use modules::{agent, fs, git, pty, shell, workspace};
+use modules::{agent, agent_sessions, agent_todos, agent_usage, fs, git, pty, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -111,7 +111,6 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .manage(pty::PtyState::default())
-        .manage(shell::ShellState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
@@ -185,14 +184,6 @@ pub fn run() {
             git::commands::git_commit_files,
             git::commands::git_commit_file_diff,
             git::commands::git_remote_url,
-            shell::shell_run_command,
-            shell::shell_session_open,
-            shell::shell_session_run,
-            shell::shell_session_close,
-            shell::shell_bg_spawn,
-            shell::shell_bg_logs,
-            shell::shell_bg_kill,
-            shell::shell_bg_list,
             workspace::wsl_list_distros,
             workspace::wsl_default_distro,
             workspace::wsl_home,
@@ -202,6 +193,9 @@ pub fn run() {
             open_settings_window,
             agent::agent_enable_claude_hooks,
             agent::agent_claude_hooks_status,
+            agent_sessions::claude_sessions_list,
+            agent_todos::agent_read_todos,
+            agent_usage::agent_read_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

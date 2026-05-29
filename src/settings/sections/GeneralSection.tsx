@@ -20,6 +20,7 @@ import {
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
   setAgentNotifications,
+  setHudEnabled,
   setAutostart,
   setRestoreWindowState,
   setShowHidden,
@@ -76,6 +77,7 @@ export function GeneralSection() {
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  const hudEnabled = usePreferencesStore((s) => s.hudEnabled);
 
   useEffect(() => {
     let alive = true;
@@ -303,6 +305,15 @@ export function GeneralSection() {
           <Switch
             checked={agentNotifications}
             onCheckedChange={(v) => void setAgentNotifications(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Agent HUD"
+          description="Show a small overlay on a terminal running Claude Code with its context-window usage, model, and an estimated cost. Read-only, derived from the agent's own transcript."
+        >
+          <Switch
+            checked={hudEnabled}
+            onCheckedChange={(v) => void setHudEnabled(v)}
           />
         </SettingRow>
       </div>

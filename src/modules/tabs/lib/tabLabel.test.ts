@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { labelFor } from "./tabLabel";
-import type { TerminalTab } from "./useTabs";
+import type { AgentDashboardTab, TerminalTab } from "./useTabs";
 
 function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
   return {
@@ -38,5 +38,16 @@ describe("labelFor (terminal tabs)", () => {
 
   it("handles Windows-style cwd separators", () => {
     expect(labelFor(terminalTab({ cwd: "C:\\Users\\me\\proj" }))).toBe("proj");
+  });
+});
+
+describe("labelFor (agent dashboard tab)", () => {
+  it("always labels the dashboard 'Agents'", () => {
+    const tab: AgentDashboardTab = {
+      id: 9,
+      kind: "agent-dashboard",
+      title: "ignored",
+    };
+    expect(labelFor(tab)).toBe("Agents");
   });
 });

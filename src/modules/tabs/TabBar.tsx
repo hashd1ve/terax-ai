@@ -24,6 +24,8 @@ import {
   Cancel01Icon,
   Clock01Icon,
   ComputerTerminal02Icon,
+  DashboardSpeed02Icon,
+  File01Icon,
   GitBranchIcon,
   GitCompareIcon,
   Globe02Icon,
@@ -57,6 +59,8 @@ type Props = {
   onRename: (id: number, title: string) => void;
   /** Override a tab's color (hue 0–360), or null to revert to the folder default. */
   onSetColor: (id: number, hue: number | null) => void;
+  /** Open the files a coding agent edited in this tab as pinned editor tabs. */
+  onOpenAgentFiles: (paths: string[]) => void;
   compact?: boolean;
 };
 
@@ -73,6 +77,7 @@ export function TabBar({
   onPin,
   onRename,
   onSetColor,
+  onOpenAgentFiles,
   compact,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -130,6 +135,7 @@ export function TabBar({
                   >
                     <TabIcon tab={t} />
                     <ActivityIndicator tab={t} />
+                    <AgentFilesChip tab={t} onOpen={onOpenAgentFiles} />
                     <TabRenameInput
                       initial={labelFor(t)}
                       onCommit={(value) => {
@@ -199,6 +205,7 @@ export function TabBar({
                       {labelFor(t)}
                     </span>
                     <ActivityIndicator tab={t} />
+                    <AgentFilesChip tab={t} onOpen={onOpenAgentFiles} />
                     {t.kind === "editor" && t.dirty ? (
                       <span
                         aria-label="Unsaved changes"
@@ -413,6 +420,16 @@ function TabIcon({ tab }: { tab: Tab }) {
       />
     );
   }
+  if (tab.kind === "agent-dashboard") {
+    return (
+      <HugeiconsIcon
+        icon={DashboardSpeed02Icon}
+        size={14}
+        strokeWidth={2}
+        className="shrink-0"
+      />
+    );
+  }
   return (
     <HugeiconsIcon
       icon={ComputerTerminal02Icon}
@@ -454,6 +471,61 @@ function ActivityIndicator({ tab }: { tab: Tab }) {
       aria-label={state === "blocked" ? "Needs input" : "Done"}
       className={cn("size-1.5 shrink-0 rounded-full", color)}
     />
+  );
+}
+
+/** Stable empty array so the selector never returns a fresh reference for
+ *  non-terminal tabs (would defeat Zustand's reference equality and re-render). */
+const NO_FILES: string[] = [];
+
+/** Union the changed files across a tab's leaves, most-recent-last, deduped. */
+function tabChangedFiles(
+  leaves: Record<string, { changedFiles: string[] }>,
+  uuids: string[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of uuids) {
+    for (const f of leaves[u]?.changedFiles ?? NO_FILES) {
+      if (seen.has(f)) continue;
+      seen.add(f);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
+function AgentFilesChip({
+  tab,
+  onOpen,
+}: {
+  tab: Tab;
+  onOpen: (paths: string[]) => void;
+}) {
+  // Subscribe to the joined changed-file list. The selector returns a string
+  // key so Zustand's Object.is check only re-renders when the set changes.
+  const key = useActivityStore((s) =>
+    tab.kind === "terminal"
+      ? tabChangedFiles(s.leaves, leafUuids(tab.paneTree)).join("\n")
+      : "",
+  );
+  if (tab.kind !== "terminal" || key === "") return null;
+  const files = key.split("\n");
+  const names = files.map((f) => f.split(/[\\/]/).pop() || f);
+  return (
+    <span
+      role="button"
+      aria-label={`Review ${files.length} agent-edited file${files.length === 1 ? "" : "s"}`}
+      title={names.join("\n")}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen(files);
+      }}
+      className="flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[10px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      <HugeiconsIcon icon={File01Icon} size={11} strokeWidth={2} />
+      {files.length}
+    </span>
   );
 }
 

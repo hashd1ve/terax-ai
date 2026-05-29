@@ -341,7 +341,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         className={COMPACT_ITEM}
                         onSelect={() => onAttachToAgent?.(hit.path)}
                       >
-                        Attach to Agent
+                        Send to Claude
                       </ContextMenuItem>
                     </ContextMenuContent>
                   </ContextMenu>

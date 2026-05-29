@@ -59,6 +59,79 @@ describe("activityStore", () => {
     s.dropLeaf("a");
     expect(useActivityStore.getState().leaves["a"]).toBeUndefined();
   });
+
+  it("setMeta merges only present fields and never clobbers known ones", () => {
+    const s = useActivityStore.getState();
+    s.setMeta("u1", { tool: "Edit", session: "sid", cwd: "/proj", transcript: "/t.jsonl" });
+    let leaf = useActivityStore.getState().leaves["u1"];
+    expect(leaf.currentTool).toBe("Edit");
+    expect(leaf.sessionId).toBe("sid");
+    expect(leaf.transcriptPath).toBe("/t.jsonl");
+    expect(leaf.agentCwd).toBe("/proj");
+
+    // A later event carrying only session/cwd must not wipe the known tool.
+    s.setMeta("u1", { tool: null, session: "sid", cwd: "/proj" });
+    leaf = useActivityStore.getState().leaves["u1"];
+    expect(leaf.currentTool).toBe("Edit");
+  });
+
+  it("setMeta preserves an existing activity state", () => {
+    const s = useActivityStore.getState();
+    s.applyHook("u1", "working", 1000);
+    s.setMeta("u1", { tool: "Bash" });
+    const leaf = useActivityStore.getState().leaves["u1"];
+    expect(leaf.state).toBe("working");
+    expect(leaf.currentTool).toBe("Bash");
+  });
+
+  it("setMeta with a file appends, dedupes by exact path, and caps at 50", () => {
+    const s = useActivityStore.getState();
+    s.setMeta("u1", { file: "/a.ts" });
+    s.setMeta("u1", { file: "/a.ts" }); // duplicate, must not double-count
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual(["/a.ts"]);
+
+    for (let i = 0; i < 60; i++) s.setMeta("u1", { file: `/f${i}.ts` });
+    const files = useActivityStore.getState().leaves["u1"].changedFiles;
+    expect(files.length).toBe(50);
+    // Oldest dropped, most recent kept last.
+    expect(files[files.length - 1]).toBe("/f59.ts");
+    expect(files).not.toContain("/a.ts");
+  });
+
+  it("setMeta accumulates distinct files in order", () => {
+    const s = useActivityStore.getState();
+    s.setMeta("u1", { file: "/a.ts" });
+    s.setMeta("u1", { file: "/b.ts" });
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual([
+      "/a.ts",
+      "/b.ts",
+    ]);
+  });
+
+  it("applyHook done -> working clears changedFiles", () => {
+    const s = useActivityStore.getState();
+    s.setMeta("u1", { file: "/a.ts" });
+    s.applyHook("u1", "done", 1000);
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual(["/a.ts"]);
+    s.applyHook("u1", "working", 2000);
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual([]);
+  });
+
+  it("applyHook blocked -> working keeps changedFiles (same turn)", () => {
+    const s = useActivityStore.getState();
+    s.applyHook("u1", "working", 1000);
+    s.setMeta("u1", { file: "/a.ts" });
+    s.applyHook("u1", "blocked", 2000); // mid-turn: agent asked for input
+    s.applyHook("u1", "working", 3000); // user replied, same turn resumes
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual(["/a.ts"]);
+  });
+
+  it("setMeta without a file leaves changedFiles untouched", () => {
+    const s = useActivityStore.getState();
+    s.setMeta("u1", { file: "/a.ts" });
+    s.setMeta("u1", { tool: "Bash", cwd: "/proj" });
+    expect(useActivityStore.getState().leaves["u1"].changedFiles).toEqual(["/a.ts"]);
+  });
 });
 
 describe("no-tmux fallback", () => {

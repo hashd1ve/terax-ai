@@ -1,8 +1,10 @@
 pub mod agent;
+pub mod agent_sessions;
 pub mod agent_sock;
+pub mod agent_todos;
+pub mod agent_usage;
 pub mod fs;
 pub mod git;
 pub mod proc;
 pub mod pty;
-pub mod shell;
 pub mod workspace;

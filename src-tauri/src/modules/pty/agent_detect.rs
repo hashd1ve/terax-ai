@@ -30,6 +30,7 @@ pub enum Transition {
     Working,
     Attention,
     Finished,
+    Error,
     Exited,
 }
 
@@ -49,6 +50,7 @@ impl Transition {
             Transition::Working => AgentSignal { id, kind: "working", agent: None },
             Transition::Attention => AgentSignal { id, kind: "attention", agent: None },
             Transition::Finished => AgentSignal { id, kind: "finished", agent: None },
+            Transition::Error => AgentSignal { id, kind: "error", agent: None },
             Transition::Exited => AgentSignal { id, kind: "exited", agent: None },
         }
     }
@@ -177,6 +179,13 @@ impl AgentDetector {
                     self.ensure_armed(emit);
                     self.status = Status::Waiting;
                     emit(Transition::Finished);
+                }
+                // A failed tool call. Reported for history only; deliberately
+                // leaves `status` unchanged so it doesn't override a subsequent
+                // working/finished transition for the same turn.
+                b"error" => {
+                    self.ensure_armed(emit);
+                    emit(Transition::Error);
                 }
                 _ => {}
             }
@@ -322,6 +331,24 @@ mod tests {
         assert_eq!(
             run(&mut d, &osc("777;notify;Terax;attention")),
             vec![started("claude"), Transition::Attention]
+        );
+    }
+
+    #[test]
+    fn error_marker_reports_without_flapping_status() {
+        let mut d = AgentDetector::new();
+        run(&mut d, &osc("133;C;claude")); // armed, status Working
+        assert_eq!(run(&mut d, &osc("777;notify;Terax;error")), vec![Transition::Error]);
+        // error left status at Working, so a following working marker is a no-op.
+        assert!(run(&mut d, &osc("777;notify;Terax;working")).is_empty());
+    }
+
+    #[test]
+    fn error_marker_auto_arms_when_unarmed() {
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;error")),
+            vec![started("claude"), Transition::Error]
         );
     }
 

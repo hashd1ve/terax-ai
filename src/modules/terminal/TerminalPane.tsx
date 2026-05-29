@@ -1,3 +1,4 @@
+import { AgentHud } from "@/modules/agents/components/AgentHud";
 import { useTheme } from "@/modules/theme";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isRestoredLeaf } from "@/modules/workspace/lib/workspaceStore";
@@ -92,13 +93,17 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(
 
     return (
       <div
-        ref={containerRef}
-        className="zoom-exempt h-full w-full"
+        className="relative h-full w-full"
         style={{
           visibility: visible ? "visible" : "hidden",
           pointerEvents: visible ? "auto" : "none",
         }}
-      />
+      >
+        <div ref={containerRef} className="zoom-exempt h-full w-full" />
+        {/* Only the on-screen tab mounts the HUD; the component itself stays
+            null + timer-free unless this leaf is running an agent. */}
+        {visible && persistId && <AgentHud uuid={persistId} />}
+      </div>
     );
   },
 );

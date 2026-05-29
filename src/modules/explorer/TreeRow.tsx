@@ -207,7 +207,7 @@ function EntryRowImpl(props: EntryRowProps) {
           className={COMPACT_ITEM}
           onSelect={() => onAttachToAgent?.(path)}
         >
-          Attach to Agent
+          Send to Claude
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem

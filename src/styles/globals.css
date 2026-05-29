@@ -302,7 +302,7 @@ textarea,
 
 /* Kill native scrollbars everywhere by default — Linux/Windows ship chunky
  * Chromium bars that break the chrome, and macOS WKWebView flashes its overlay
- * scrollbar briefly during layout transitions (AI panel open, pane split,
+ * scrollbar briefly during layout transitions (sidebar toggle, pane split,
  * window resize) which looks like a glitch. Visible scroll affordances are
  * provided per-region via shadcn <ScrollArea>. */
 html,

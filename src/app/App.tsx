@@ -15,7 +15,21 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { AgentActivityBridge, AgentNotificationsBridge } from "@/modules/agents";
+import {
+  AgentActivityBridge,
+  AgentDashboard,
+  AgentNotificationsBridge,
+  AgentTodosBridge,
+  buildAgentRef,
+  discoverSlashCommands,
+  normalizeCwd,
+  pickAgentLeafId,
+  PlanTodoPanel,
+  QuickPromptPalette,
+  sendToActiveAgent,
+  type ClaudeSession,
+  type SlashCommand,
+} from "@/modules/agents";
 import { Toaster } from "@/components/ui/sonner";
 import { native } from "@/modules/system/native";
 import {
@@ -82,6 +96,7 @@ import {
   leafIds,
   respawnSession,
   TerminalStack,
+  whenSessionReady,
   writeToSession,
   type TerminalPaneHandle,
 } from "@/modules/terminal";
@@ -147,7 +162,8 @@ function readSidebarWidth(): number {
 function readSidebarView(): SidebarViewId {
   try {
     const stored = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (stored === "explorer" || stored === "source-control") return stored;
+    if (stored === "explorer" || stored === "source-control" || stored === "agent")
+      return stored;
   } catch {
     // ignore
   }
@@ -179,6 +195,7 @@ export default function App() {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAgentDashboard,
     closeTab,
     updateTab,
     selectByIndex,
@@ -258,6 +275,8 @@ export default function App() {
     return t && t.kind === "terminal" ? t : null;
   }, [tabs, activeId]);
   const activeLeafId = activeTerminalTab?.activeLeafId ?? null;
+  const activeLeafIdRef = useRef(activeLeafId);
+  activeLeafIdRef.current = activeLeafId;
 
   const searchAddons = useRef<Map<number, SearchAddon>>(new Map());
   const [activeSearchAddon, setActiveSearchAddon] =
@@ -444,12 +463,19 @@ export default function App() {
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newEditorOpen, setNewEditorOpen] = useState(false);
+  const [quickPromptOpen, setQuickPromptOpen] = useState(false);
 
   // Hydrate the cross-window preference store (theme, fonts, shortcuts, etc.).
   const initPrefs = usePreferencesStore((s) => s.init);
+  const quickPrompts = usePreferencesStore((s) => s.quickPrompts);
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
+
+  // Claude Code commands/skills, discovered lazily the first time the palette
+  // opens (cheap fs reads, swallowed on error so they never block the palette).
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const slashCommandsLoaded = useRef(false);
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -460,6 +486,7 @@ export default function App() {
   const isGitDiffTab =
     activeTab?.kind === "git-diff" || activeTab?.kind === "git-commit-file";
   const isGitHistoryTab = activeTab?.kind === "git-history";
+  const isAgentDashboardTab = activeTab?.kind === "agent-dashboard";
 
   useEffect(() => {
     type FileWrittenPayload = { path: string; source?: string };
@@ -703,6 +730,42 @@ export default function App() {
       openFileTab(path, pin ?? false);
     },
     [openFileTab],
+  );
+
+  // Open every file a coding agent edited in a tab as a pinned editor tab, so
+  // the user reviews the edits in Terax rather than scrolling the terminal.
+  const handleOpenAgentFiles = useCallback(
+    (paths: string[]) => {
+      for (const path of paths) openFileTab(path, true);
+    },
+    [openFileTab],
+  );
+
+  // Working directory of the leaf that a handoff will target, used to relativize
+  // the @-reference so it matches the agent's cwd. Resolves the chosen agent
+  // leaf's cwd (falling back to the active terminal leaf), else null for an
+  // absolute path.
+  const agentLeafCwd = useCallback((): string | null => {
+    const targetLeaf = pickAgentLeafId(activeLeafIdRef.current);
+    if (targetLeaf === null) return null;
+    for (const t of tabsRef.current) {
+      if (t.kind !== "terminal") continue;
+      const cwd = findLeafCwd(t.paneTree, targetLeaf);
+      if (cwd !== undefined) return cwd ?? t.cwd ?? null;
+    }
+    return null;
+  }, []);
+
+  // Hand a file path to the focused Claude session as an @-reference, relativized
+  // against the agent's working directory when known.
+  const handleSendPathToAgent = useCallback(
+    (absPath: string) => {
+      sendToActiveAgent(
+        buildAgentRef(absPath, agentLeafCwd(), null),
+        activeLeafIdRef.current,
+      );
+    },
+    [agentLeafCwd],
   );
 
   // Register how terminal file-path links resolve their cwd and open files.
@@ -953,10 +1016,24 @@ export default function App() {
       "view.zoomReset": zoomReset,
       "editor.undo": () => editorRefs.current.get(activeId)?.undo(),
       "editor.redo": () => editorRefs.current.get(activeId)?.redo(),
+      "agent.sendSelection": () => {
+        const sel = editorRefs.current.get(activeId)?.getSelectionRef();
+        if (!sel) return;
+        sendToActiveAgent(
+          buildAgentRef(sel.path, agentLeafCwd(), {
+            startLine: sel.startLine,
+            endLine: sel.endLine,
+          }),
+          activeLeafIdRef.current,
+        );
+      },
+      "agent.quickPrompt": () => setQuickPromptOpen((v) => !v),
+      "agent.dashboard": () => openAgentDashboard(),
     }),
     [
       activeId,
       cycleTab,
+      openAgentDashboard,
       handleCloseTabOrPane,
       openNewTab,
       openNewPrivateTab,
@@ -970,12 +1047,17 @@ export default function App() {
       zoomIn,
       zoomOut,
       zoomReset,
+      agentLeafCwd,
     ],
   );
 
   const shortcutsDisabled = useCallback(
     (id: ShortcutId, e: KeyboardEvent) => {
-      if (id === "editor.undo" || id === "editor.redo") {
+      if (
+        id === "editor.undo" ||
+        id === "editor.redo" ||
+        id === "agent.sendSelection"
+      ) {
         return activeTab?.kind !== "editor";
       }
       if (id === "terminal.clear") {
@@ -1049,6 +1131,55 @@ export default function App() {
     [setActiveId, focusPane],
   );
 
+  // Open a fresh terminal at the session's cwd and resume the dead Claude
+  // session there. Wait for the PTY to be ready before writing so the command
+  // isn't swallowed by the spawning shell. CR submits (unlike the @-handoff).
+  const onResumeSession = useCallback(
+    (session: ClaudeSession) => {
+      const tabId = newTab(session.cwd);
+      // newTab allocates the leaf id immediately after the tab id, so the new
+      // tab's only leaf is tabId + 1 (the setState that records it hasn't
+      // flushed yet, so tabsRef can't be read synchronously here).
+      const leafId = tabId + 1;
+      void whenSessionReady(leafId).then(() => {
+        writeToSession(leafId, `claude --resume ${session.sessionId}\r`);
+      });
+    },
+    [newTab],
+  );
+
+  // Focus a live terminal leaf already sitting in the session's cwd; if none
+  // matches, fall back to resuming in a new tab.
+  const onActivateSession = useCallback(
+    (session: ClaudeSession) => {
+      const target = normalizeCwd(session.cwd);
+      for (const t of tabsRef.current) {
+        if (t.kind !== "terminal") continue;
+        for (const leafId of leafIds(t.paneTree)) {
+          const cwd = findLeafCwd(t.paneTree, leafId);
+          if (cwd && normalizeCwd(cwd) === target) {
+            onActivateAgent(t.id, leafId);
+            return;
+          }
+        }
+      }
+      onResumeSession(session);
+    },
+    [onActivateAgent, onResumeSession],
+  );
+
+  const liveCwds = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of tabs) {
+      if (t.kind !== "terminal") continue;
+      for (const leafId of leafIds(t.paneTree)) {
+        const cwd = findLeafCwd(t.paneTree, leafId);
+        if (cwd) set.add(normalizeCwd(cwd));
+      }
+    }
+    return set;
+  }, [tabs]);
+
   const handleLeafExit = useCallback(
     (leafId: number, _code: number) => {
       const all = tabsRef.current;
@@ -1114,6 +1245,40 @@ export default function App() {
   ]);
 
   const activeCwd = activeTerminalLeafCwd;
+
+  const quickPromptProjectDir =
+    activeTerminalLeafCwd ?? explorerRoot ?? workspaceFallbackPath;
+  useEffect(() => {
+    if (!quickPromptOpen || slashCommandsLoaded.current) return;
+    slashCommandsLoaded.current = true;
+    void discoverSlashCommands(home, quickPromptProjectDir).then(
+      setSlashCommands,
+    );
+  }, [quickPromptOpen, home, quickPromptProjectDir]);
+
+  // Resolved presentationally for the palette: the file is the active editor's
+  // path relativized against the agent cwd, branch is the source-control
+  // branch, selection is the live editor selection text. Each may be null.
+  const quickPromptContext = useMemo(
+    () => ({
+      file: activeFilePath
+        ? buildAgentRef(activeFilePath, agentLeafCwd(), null).trim().slice(1)
+        : null,
+      branch: sourceControl.status?.branch ?? null,
+      selection:
+        (activeTab?.kind === "editor"
+          ? editorRefs.current.get(activeId)?.getSelection()
+          : null) ?? null,
+    }),
+    [
+      activeFilePath,
+      agentLeafCwd,
+      sourceControl.status?.branch,
+      activeTab?.kind,
+      activeId,
+      quickPromptOpen,
+    ],
+  );
 
   const workspaceSurface = (
     <div className="relative h-full min-h-0">
@@ -1204,6 +1369,19 @@ export default function App() {
           onSearchHandle={setGitHistoryHandle}
         />
       </div>
+      <div
+        className={cn(
+          "absolute inset-0",
+          !isAgentDashboardTab && "invisible pointer-events-none",
+        )}
+        aria-hidden={!isAgentDashboardTab}
+      >
+        <AgentDashboard
+          tabs={tabs}
+          active={isAgentDashboardTab}
+          onActivate={onActivateAgent}
+        />
+      </div>
     </div>
   );
 
@@ -1224,6 +1402,7 @@ export default function App() {
             onPin={pinTab}
             onRename={handleRenameTab}
             onSetColor={handleSetTabColor}
+            onOpenAgentFiles={handleOpenAgentFiles}
             onToggleSidebar={toggleSidebar}
             onSplit={splitActivePaneInActiveTab}
             canSplit={
@@ -1231,6 +1410,10 @@ export default function App() {
               leafIds(activeTerminalTab.paneTree).length < MAX_PANES_PER_TAB
             }
             onActivateAgent={onActivateAgent}
+            liveCwds={liveCwds}
+            onActivateSession={onActivateSession}
+            onResumeSession={onResumeSession}
+            onOpenDashboard={openAgentDashboard}
             onOpenSettings={() => void openSettingsWindow()}
             searchTarget={searchTarget}
             searchRef={searchInlineRef}
@@ -1263,9 +1446,12 @@ export default function App() {
                         onPathRenamed={handlePathRenamed}
                         onPathDeleted={handlePathDeleted}
                         onRevealInTerminal={cdInNewTab}
+                        onAttachToAgent={handleSendPathToAgent}
                         onOpenMarkdownPreview={openMarkdownPreview}
                         onOpenHtmlPreview={openHtmlPreview}
                       />
+                    ) : sidebarView === "agent" ? (
+                      <PlanTodoPanel tabs={tabs} activeId={activeId} />
                     ) : (
                       <SourceControlPanel
                         open
@@ -1314,6 +1500,7 @@ export default function App() {
             activeId={activeId}
             onLeafCwd={setLeafCwd}
           />
+          <AgentTodosBridge tabs={tabs} activeId={activeId} />
           <Toaster position="bottom-right" />
 
           <ShortcutsDialog
@@ -1326,6 +1513,21 @@ export default function App() {
             onOpenChange={setNewEditorOpen}
             rootPath={explorerRoot ?? home}
             onCreated={(path) => openFileTab(path)}
+          />
+
+          <QuickPromptPalette
+            open={quickPromptOpen}
+            onOpenChange={setQuickPromptOpen}
+            prompts={quickPrompts}
+            context={quickPromptContext}
+            slashCommands={slashCommands}
+            onSubmit={(text) => {
+              if (activeLeafIdRef.current !== null) {
+                writeToSession(activeLeafIdRef.current, text);
+              } else {
+                toast("No active terminal to receive the prompt");
+              }
+            }}
           />
 
           <AlertDialog

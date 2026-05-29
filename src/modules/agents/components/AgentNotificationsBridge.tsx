@@ -81,6 +81,20 @@ function handleSignal(sig: AgentSignal, ctx: Ctx): void {
       if (session) route(session, "finished", ctx);
       return;
     }
+    case "error": {
+      // History only: a failed tool call is routine during a run, so it lands a
+      // red "failed" row in the bell but never toasts or OS-notifies.
+      const info = tabInfo(ctx.tabs, leafId);
+      const session = store.sessions[leafId];
+      store.pushNotification({
+        source: "terminal",
+        agent: session?.agent ?? "claude",
+        kind: "error",
+        tabId: info?.tabId ?? session?.tabId ?? 0,
+        leafId,
+      });
+      return;
+    }
     case "exited":
       store.finish(leafId);
       return;

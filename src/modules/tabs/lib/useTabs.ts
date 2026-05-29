@@ -39,7 +39,7 @@ export type TerminalTab = Colorable & {
   cwd?: string;
   paneTree: PaneNode;
   activeLeafId: number;
-  /** AI agent cannot read buffer / context of this terminal. */
+  /** Private terminal: never persisted to the workspace store (lost on restart). */
   private?: boolean;
   /** User-set label that overrides the cwd-derived name. Survives cd. */
   customTitle?: string;
@@ -109,6 +109,12 @@ export type GitCommitFileDiffTab = Colorable & {
   originalPath: string | null;
 };
 
+export type AgentDashboardTab = Colorable & {
+  id: number;
+  kind: "agent-dashboard";
+  title: string;
+};
+
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -117,7 +123,8 @@ export type Tab =
   | HtmlPreviewTab
   | GitDiffTab
   | GitHistoryTab
-  | GitCommitFileDiffTab;
+  | GitCommitFileDiffTab
+  | AgentDashboardTab;
 
 export type TabPatch = Partial<{
   title: string;
@@ -243,7 +250,7 @@ export function useTabs(
    *
    * - `pin = true` (default) — opens or activates a **persistent** tab.
    *   If the path is currently in the preview slot it is promoted in-place.
-   *   Use this for programmatic opens (AI diff, New File dialog, etc.).
+   *   Use this for programmatic opens (New File dialog, git diff, etc.).
    * - `pin = false` — VSCode-style **preview** tab. A single shared slot is
    *   reused: if a persistent tab for the path already exists it is activated;
    *   otherwise the current preview slot is replaced with the new path.
@@ -527,6 +534,25 @@ export function useTabs(
     },
     [],
   );
+
+  // Singleton: one dashboard tab at most. Re-open just re-activates it.
+  const openAgentDashboard = useCallback(() => {
+    const curr = tabsRef.current;
+    const existing = curr.find((t) => t.kind === "agent-dashboard");
+    if (existing) {
+      setActiveId(existing.id);
+      return existing.id;
+    }
+    const id = nextIdRef.current++;
+    const nextTabs: Tab[] = [
+      ...curr,
+      { id, kind: "agent-dashboard", title: "Agents" },
+    ];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    setActiveId(id);
+    return id;
+  }, []);
 
   const closeTab = useCallback((id: number) => {
     let toDispose: number[] = [];
@@ -825,6 +851,7 @@ export function useTabs(
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAgentDashboard,
     closeTab,
     updateTab,
     selectByIndex,
