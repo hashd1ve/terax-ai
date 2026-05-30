@@ -19,7 +19,7 @@ import {
   applyLetterSpacing,
   applyTheme as applyPoolTheme,
   applyScrollback,
-  applyWebglPreference,
+  reconcileWebgl,
   configureRendererPool,
   focusSlot,
   getSlotForLeaf,
@@ -470,6 +470,9 @@ export function useTerminalSession({
   const fontSize = usePreferencesStore((p) => p.terminalFontSize);
   const zoomLevel = usePreferencesStore((p) => p.zoomLevel);
   useEffect(() => {
+    // Flip WebGL ⇄ DOM for the new zoom before resizing so the active renderer
+    // fits at the right cell metrics (see reconcileWebgl for the why).
+    reconcileWebgl();
     applyFontSize(Math.max(4, Math.round(fontSize * zoomLevel)));
   }, [fontSize, zoomLevel]);
 
@@ -490,7 +493,7 @@ export function useTerminalSession({
 
   const webglPref = usePreferencesStore((p) => p.terminalWebglEnabled);
   useEffect(() => {
-    applyWebglPreference(webglPref);
+    reconcileWebgl();
   }, [webglPref]);
 
   const bgActive = usePreferencesStore(

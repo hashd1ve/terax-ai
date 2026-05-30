@@ -577,9 +577,20 @@ const WEBGL_RECOVERY_DELAY_MS = 250;
 // unhide to defeat silent GPU/context staleness.
 const SLOT_STALE_MS = 10_000;
 
+// WebKit bitmap-scales a <canvas> under CSS `zoom`, but re-rasterizes DOM text
+// crisply. The terminal sits inside the app-zoom subtree (`.zoom-content` ×
+// `.zoom-exempt`), so any active app zoom (zoomLevel ≠ 1) sandwiches the WebGL
+// canvas between two non-integer zooms and visibly squishes/blurs the glyphs.
+// At those zoom levels we drop to xterm's DOM renderer (crisp under `zoom`) and
+// only use WebGL at 1.0, where the canvas maps 1:1 to device pixels.
+function webglAllowed(): boolean {
+  const p = usePreferencesStore.getState();
+  return p.terminalWebglEnabled && Math.abs(p.zoomLevel - 1) < 1e-3;
+}
+
 function attachWebgl(slot: Slot): void {
   if (slot.webglAddon || !slot.term.element) return;
-  if (!usePreferencesStore.getState().terminalWebglEnabled) return;
+  if (!webglAllowed()) return;
   const elem = slot.term.element;
   const before = new Set<HTMLCanvasElement>(
     elem.querySelectorAll<HTMLCanvasElement>("canvas"),
@@ -600,7 +611,7 @@ function attachWebgl(slot: Slot): void {
       // forever. Defer past WebKit's reset window before retrying.
       setTimeout(() => {
         if (slot.webglAddon) return;
-        if (!usePreferencesStore.getState().terminalWebglEnabled) return;
+        if (!webglAllowed()) return;
         attachWebgl(slot);
         if (slot.webglAddon) {
           try {
@@ -672,10 +683,18 @@ function releaseCanvasContext(canvas: HTMLCanvasElement): void {
   } catch {}
 }
 
-export function applyWebglPreference(enabled: boolean): void {
+// Bring every slot's renderer in line with `webglAllowed()`. Called when the
+// WebGL preference OR the app zoom changes — the latter flips slots between
+// WebGL (zoom 1.0) and the DOM renderer (zoom ≠ 1) to keep text crisp.
+export function reconcileWebgl(): void {
+  const on = webglAllowed();
   for (const slot of slots) {
-    if (enabled && !slot.webglAddon) attachWebgl(slot);
-    else if (!enabled && slot.webglAddon) disposeSlotWebgl(slot);
+    if (on === !!slot.webglAddon) continue;
+    if (on) attachWebgl(slot);
+    else disposeSlotWebgl(slot);
+    try {
+      slot.term.refresh(0, slot.term.rows - 1);
+    } catch {}
   }
 }
 
